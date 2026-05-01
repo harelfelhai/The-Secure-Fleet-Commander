@@ -10,7 +10,6 @@ async def list_zones() -> dict:
     zones = get_zones()
     return {
         "zones": [
-            {"name": z["name"], "type": z["type"], "coordinates": z["coordinates"]}
-            for z in zones
+            {"name": z["name"], "type": z["type"], "coordinates": z["coordinates"]} for z in zones
         ]
     }

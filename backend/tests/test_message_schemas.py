@@ -8,7 +8,6 @@ from pydantic import ValidationError
 
 from app.schemas.messages import TelemetryFrame
 
-
 VALID_FRAME = {
     "msg_type": "TELEMETRY",
     "schema_version": "1.0",

@@ -12,8 +12,7 @@ from app.services import zone_evaluator
 def load_test_zones(tmp_path):
     """Load a minimal zones.json into the evaluator for every test."""
     zones_file = tmp_path / "zones.json"
-    zones_file.write_text(
-        """{
+    zones_file.write_text("""{
           "zones": [
             {
               "name": "Test Zone Alpha",
@@ -27,8 +26,7 @@ def load_test_zones(tmp_path):
               ]
             }
           ]
-        }"""
-    )
+        }""")
     zone_evaluator.load_zones(str(zones_file))
     yield
     zone_evaluator._zones = []

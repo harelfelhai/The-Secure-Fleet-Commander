@@ -46,9 +46,7 @@ class FlightSession(Base):
 
 class GpsBreadcrumb(Base):
     __tablename__ = "gps_breadcrumbs"
-    __table_args__ = (
-        Index("idx_breadcrumbs_agent_time", "agent_id", "recorded_at"),
-    )
+    __table_args__ = (Index("idx_breadcrumbs_agent_time", "agent_id", "recorded_at"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id: Mapped[uuid.UUID] = mapped_column(
@@ -69,9 +67,7 @@ class GpsBreadcrumb(Base):
 
 class CommandLog(Base):
     __tablename__ = "command_logs"
-    __table_args__ = (
-        Index("idx_commands_agent", "agent_id", "issued_at"),
-    )
+    __table_args__ = (Index("idx_commands_agent", "agent_id", "issued_at"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     agent_id: Mapped[uuid.UUID] = mapped_column(

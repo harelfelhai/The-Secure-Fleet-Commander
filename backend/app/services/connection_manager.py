@@ -8,7 +8,6 @@ Both are singletons accessed at module level.
 """
 
 import logging
-from collections import defaultdict
 
 from fastapi import WebSocket
 

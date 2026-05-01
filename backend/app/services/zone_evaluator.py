@@ -16,7 +16,7 @@ from shapely.geometry import Point, Polygon
 
 logger = logging.getLogger(__name__)
 
-# Module-level zone cache: list of {"name": str, "type": str, "polygon": Polygon, "coordinates": list}
+# Module-level zone cache: list of dicts with keys name, type, polygon, coordinates
 _zones: list[dict] = []
 
 
@@ -36,12 +36,14 @@ def load_zones(config_path: str) -> None:
     for zone in raw.get("zones", []):
         # coordinates are [[lon, lat], ...] (GeoJSON order)
         polygon = Polygon([(c[0], c[1]) for c in zone["coordinates"]])
-        _zones.append({
-            "name": zone["name"],
-            "type": zone["type"],
-            "polygon": polygon,
-            "coordinates": zone["coordinates"],
-        })
+        _zones.append(
+            {
+                "name": zone["name"],
+                "type": zone["type"],
+                "polygon": polygon,
+                "coordinates": zone["coordinates"],
+            }
+        )
 
     logger.info("Loaded %d no-fly zones", len(_zones))
 
