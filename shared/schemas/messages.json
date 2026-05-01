@@ -1,0 +1,109 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Fleet Commander Message Schemas",
+  "description": "Canonical WS message schemas. schema_version 1.0.",
+  "definitions": {
+    "TELEMETRY": {
+      "type": "object",
+      "required": ["msg_type", "schema_version", "agent_id", "timestamp", "latitude", "longitude", "altitude_m", "battery_pct"],
+      "properties": {
+        "msg_type":       { "const": "TELEMETRY" },
+        "schema_version": { "const": "1.0" },
+        "agent_id":       { "type": "string", "format": "uuid" },
+        "timestamp":      { "type": "string", "format": "date-time" },
+        "latitude":       { "type": "number", "minimum": -90,  "maximum": 90  },
+        "longitude":      { "type": "number", "minimum": -180, "maximum": 180 },
+        "altitude_m":     { "type": "number" },
+        "battery_pct":    { "type": "number", "minimum": 0, "maximum": 100 }
+      },
+      "additionalProperties": false
+    },
+    "COMMAND_FROM_FRONTEND": {
+      "type": "object",
+      "required": ["msg_type", "command_type", "agent_id", "payload"],
+      "properties": {
+        "msg_type":     { "const": "COMMAND" },
+        "command_type": { "const": "GO_TO_WAYPOINT" },
+        "agent_id":     { "type": "string", "format": "uuid" },
+        "payload": {
+          "type": "object",
+          "required": ["latitude", "longitude", "altitude_m"],
+          "properties": {
+            "latitude":   { "type": "number", "minimum": -90,  "maximum": 90  },
+            "longitude":  { "type": "number", "minimum": -180, "maximum": 180 },
+            "altitude_m": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "COMMAND_DISPATCH": {
+      "type": "object",
+      "required": ["msg_type", "command_id", "command_type", "payload", "issued_at"],
+      "properties": {
+        "msg_type":     { "const": "COMMAND" },
+        "command_id":   { "type": "string", "format": "uuid" },
+        "command_type": { "const": "GO_TO_WAYPOINT" },
+        "issued_at":    { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["latitude", "longitude", "altitude_m"],
+          "properties": {
+            "latitude":   { "type": "number" },
+            "longitude":  { "type": "number" },
+            "altitude_m": { "type": "number" }
+          }
+        }
+      }
+    },
+    "ACK": {
+      "type": "object",
+      "required": ["msg_type", "command_id", "status", "acked_at"],
+      "properties": {
+        "msg_type":   { "const": "ACK" },
+        "command_id": { "type": "string", "format": "uuid" },
+        "status":     { "type": "string", "enum": ["ACKNOWLEDGED", "FAILED", "REJECTED"] },
+        "acked_at":   { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "FLEET_UPDATE": {
+      "type": "object",
+      "required": ["msg_type", "agents"],
+      "properties": {
+        "msg_type": { "const": "FLEET_UPDATE" },
+        "agents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["agent_id", "display_name", "latitude", "longitude", "altitude_m", "battery_pct", "last_seen_at", "status"],
+            "properties": {
+              "agent_id":     { "type": "string", "format": "uuid" },
+              "display_name": { "type": "string" },
+              "latitude":     { "type": "number" },
+              "longitude":    { "type": "number" },
+              "altitude_m":   { "type": "number" },
+              "battery_pct":  { "type": "number" },
+              "last_seen_at": { "type": "string", "format": "date-time" },
+              "status":       { "type": "string", "enum": ["ONLINE", "STALE"] }
+            }
+          }
+        }
+      }
+    },
+    "VIOLATION_ALERT": {
+      "type": "object",
+      "required": ["msg_type", "agent_id", "zone_name", "latitude", "longitude", "detected_at"],
+      "properties": {
+        "msg_type":   { "const": "VIOLATION_ALERT" },
+        "agent_id":   { "type": "string", "format": "uuid" },
+        "zone_name":  { "type": "string" },
+        "latitude":   { "type": "number" },
+        "longitude":  { "type": "number" },
+        "detected_at": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    }
+  }
+}
