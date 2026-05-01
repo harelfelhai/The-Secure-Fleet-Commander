@@ -1,10 +1,11 @@
 """
 Pydantic v2 schemas for all WebSocket message types.
 These are the runtime validators for the contract defined in shared/schemas/messages.json.
+schema_version "1.0" for all MVP messages.
 """
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -68,18 +69,23 @@ class AgentStatus(BaseModel):
 
 
 class FleetUpdate(BaseModel):
-    """Outbound from Backend → Frontend (fan-out)."""
+    """Outbound from Backend → Frontend (fan-out on every telemetry frame)."""
 
     msg_type: Literal["FLEET_UPDATE"] = "FLEET_UPDATE"
     agents: list[AgentStatus]
 
 
-class ViolationAlert(BaseModel):
-    """Outbound from Backend → Frontend on geofence breach."""
+class AlertMessage(BaseModel):
+    """
+    Outbound from Backend → Frontend.
+    Replaces the narrower ViolationAlert — covers all rule-triggered events.
+    alert_type discriminates the event; context carries type-specific fields.
+    """
 
-    msg_type: Literal["VIOLATION_ALERT"] = "VIOLATION_ALERT"
+    msg_type: Literal["ALERT"] = "ALERT"
+    alert_type: Literal["GEOFENCE_VIOLATION", "LOW_BATTERY"]
+    severity: Literal["WARNING", "CRITICAL"]
     agent_id: str
-    zone_name: str
-    latitude: float
-    longitude: float
+    message: str
+    context: dict[str, Any]
     detected_at: datetime

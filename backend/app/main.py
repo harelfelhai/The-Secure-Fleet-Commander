@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import agents, violations, zones
+from app.routers import agents, auth, violations, ws, zones
 from app.services.zone_evaluator import load_zones
 
 structlog.configure(
@@ -43,6 +43,8 @@ app.add_middleware(
 app.include_router(agents.router)
 app.include_router(zones.router)
 app.include_router(violations.router)
+app.include_router(auth.router)
+app.include_router(ws.router)
 
 
 @app.get("/health", tags=["ops"])

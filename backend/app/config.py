@@ -10,7 +10,11 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60
 
     heartbeat_timeout_seconds: int = 10
+    watchdog_timeout_seconds: int = 20  # 2x heartbeat — close if no frames received
     zones_config_path: str = "../shared/schemas/zones.json"
+
+    battery_warn_pct: float = 20.0  # alert fires when battery drops below this
+    battery_clear_pct: float = 25.0  # hysteresis — alert clears when battery rises above this
 
     debug: bool = False
 

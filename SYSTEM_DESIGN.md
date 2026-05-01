@@ -277,18 +277,28 @@ Valid `status` values: `ACKNOWLEDGED | FAILED | REJECTED`
 
 `status` is computed server-side: `ONLINE` if `(now - last_seen_at) < HEARTBEAT_TIMEOUT_SECONDS`, else `STALE`.
 
-### 4.6 `VIOLATION_ALERT` — Backend → Frontend
+### 4.6 `ALERT` — Backend → Frontend
+
+Unified alert message covering all rule-triggered events. `alert_type` discriminates the event;
+`context` carries type-specific fields. Replaces the narrower `VIOLATION_ALERT` from the initial design
+(see Decision Log row 8).
 
 ```json
 {
-  "msg_type": "VIOLATION_ALERT",
+  "msg_type": "ALERT",
+  "alert_type": "GEOFENCE_VIOLATION | LOW_BATTERY",
+  "severity": "WARNING | CRITICAL",
   "agent_id": "<uuid>",
-  "zone_name": "Restricted Airspace Alpha",
-  "latitude": 32.09,
-  "longitude": 34.78,
+  "message": "Human-readable description",
+  "context": {
+    "zone_name": "Restricted Airspace Alpha"
+  },
   "detected_at": "<ISO-8601 UTC>"
 }
 ```
+
+**`GEOFENCE_VIOLATION` context fields**: `zone_name: str`
+**`LOW_BATTERY` context fields**: `battery_pct: float`, `threshold_pct: float`
 
 ### 4.7 Schema Versioning Policy
 - The `schema_version` field is checked on every inbound frame. Unknown versions are rejected with a `400`-equivalent WS close code.
@@ -313,7 +323,9 @@ Uses `shapely.geometry.Point` and `shapely.geometry.Polygon`. Coordinate order i
 Loaded once at Backend startup from `shared/schemas/zones.json`. Parsed into `shapely.Polygon` objects and held in memory. Restart required to pick up zone changes (acceptable for MVP).
 
 ### MVP Response to Violation
-Log only — write a `ViolationLog` row and push a `VIOLATION_ALERT` to all frontend WebSocket clients. No automated command issued.
+Edge-triggered: fires once on zone entry, suppressed while the agent remains inside (dedup via
+`RuleContext.active_zones`). Clears when the agent leaves. On breach: write a `ViolationLog` row
+and push an `ALERT` (type `GEOFENCE_VIOLATION`) to all frontend WebSocket clients. No automated command issued.
 
 ---
 
@@ -329,7 +341,37 @@ The `status` field in `FLEET_UPDATE` messages is also computed server-side (for 
 
 ---
 
-## 7. Extensibility Contract
+## 7. Rules Engine
+
+### Rule Interface
+```python
+class Rule(ABC):
+    name: str
+    def evaluate(self, frame: TelemetryFrame, ctx: RuleContext) -> list[InternalAlert]: ...
+```
+
+### RuleContext (per-agent, owned by RulesEngine)
+| Field | Type | Purpose |
+|---|---|---|
+| `prior_battery_pct` | `float \| None` | Updated by engine after all rules run; used for edge detection |
+| `active_zones` | `set[str]` | Zone names the agent is currently inside; prevents duplicate alerts |
+| `low_battery_active` | `bool` | True while battery is below warn threshold; enforces hysteresis |
+
+### Implemented Rules (Milestone 1)
+| Rule | Trigger | Dedup strategy | Persisted? |
+|---|---|---|---|
+| `GeofenceRule` | Agent enters a no-fly zone polygon | Entry-only; suppressed while inside | Yes — `ViolationLog` row |
+| `LowBatteryRule` | Battery drops below `BATTERY_WARN_PCT` (20%) | Edge-triggered; clears at `BATTERY_CLEAR_PCT` (25%) | No — transient UI alert |
+
+### Engine Lifecycle
+1. `RulesEngine.evaluate(frame)` runs all rules in order, collecting `InternalAlert` objects.
+2. If a rule raises, the exception is logged; other rules continue (fail-open).
+3. `ctx.prior_battery_pct` is updated **after** all rules have run (so each rule sees the same prior value).
+4. `clear_agent_state(agent_id)` is called on disconnect to reset dedup state for next session.
+
+---
+
+## 8. Extensibility Contract
 
 ### AbstractDeviceAdapter
 Any new device type implements exactly one class:
@@ -371,6 +413,11 @@ class AbstractDeviceAdapter(ABC):
 | 5 | 2026-05-01 | Commands via WebSocket, not REST POST | REST POST → poll for status | WebSocket is already open; avoids HTTP round-trip + polling complexity |
 | 6 | 2026-05-01 | Plain PostgreSQL table for breadcrumbs (no TimescaleDB) | TimescaleDB hypertable | Adds operational complexity before we know the ingestion rate |
 | 7 | 2026-05-01 | Violation response = log only (no auto-command) | Auto-RTH on breach | Proves the evaluator safely; auto-command added once the command pipeline is validated |
+| 8 | 2026-05-01 | Generalise `VIOLATION_ALERT` → `ALERT` with `alert_type` discriminator | Separate message type per rule | Single message type scales to any number of rules; frontend handles one shape |
+| 9 | 2026-05-01 | Add `LowBatteryRule` to Milestone 1 | Defer to Milestone 3 | Two rules proves the engine's extensibility with zero extra infrastructure cost |
+| 10 | 2026-05-01 | Geofence + low-battery alerts are edge-triggered with dedup | Alert every frame | At 1 Hz a non-deduped alert would produce 3600 rows/hour per agent inside a zone |
+| 11 | 2026-05-01 | Low-battery alerts not persisted (transient UI only) | New `alert_logs` table | Avoids schema churn; ViolationLog covers the compliance-relevant case |
+| 12 | 2026-05-01 | JWT implemented with stdlib hmac/hashlib (no PyJWT/jose) | PyJWT or python-jose | Both pull in `cryptography` which has broken native extensions in some environments; HS256 is trivial to implement correctly with stdlib |
 
 ---
 
