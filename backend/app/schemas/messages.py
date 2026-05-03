@@ -23,28 +23,20 @@ class TelemetryFrame(BaseModel):
     battery_pct: Annotated[float, Field(ge=0, le=100)]
 
 
-class WaypointPayload(BaseModel):
-    latitude: Annotated[float, Field(ge=-90, le=90)]
-    longitude: Annotated[float, Field(ge=-180, le=180)]
-    altitude_m: Annotated[float, Field(ge=0)]
-
-
 class FrontendCommand(BaseModel):
-    """Inbound from Frontend → Backend."""
+    """Inbound from Frontend → Backend. Emergency override commands only — no parameters."""
 
     msg_type: Literal["COMMAND"]
-    command_type: Literal["GO_TO_WAYPOINT"]
+    command_type: Literal["LAND", "RTH", "CUT_MOTORS"]
     agent_id: str
-    payload: WaypointPayload
 
 
 class CommandDispatch(BaseModel):
-    """Outbound from Backend → Gateway."""
+    """Outbound from Backend → Gateway. Emergency override commands — no coordinate payload."""
 
     msg_type: Literal["COMMAND"] = "COMMAND"
     command_id: str
-    command_type: Literal["GO_TO_WAYPOINT"] = "GO_TO_WAYPOINT"
-    payload: WaypointPayload
+    command_type: Literal["LAND", "RTH", "CUT_MOTORS"]
     issued_at: datetime
 
 

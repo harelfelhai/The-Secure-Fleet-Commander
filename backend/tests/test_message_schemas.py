@@ -1,12 +1,12 @@
 """
 Unit tests for Pydantic message schema validation.
-Covers the TELEMETRY frame — the primary inbound message.
+Covers the TELEMETRY frame (primary inbound) and emergency COMMAND schemas.
 """
 
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.messages import TelemetryFrame
+from app.schemas.messages import CommandDispatch, FrontendCommand, TelemetryFrame
 
 VALID_FRAME = {
     "msg_type": "TELEMETRY",
@@ -67,3 +67,52 @@ def test_wrong_schema_version():
     bad = {**VALID_FRAME, "schema_version": "2.0"}
     with pytest.raises(ValidationError):
         TelemetryFrame.model_validate(bad)
+
+
+# ── Emergency command schemas ─────────────────────────────────────────────────
+
+VALID_AGENT_ID = "550e8400-e29b-41d4-a716-446655440000"
+
+
+def test_frontend_command_land():
+    cmd = FrontendCommand.model_validate(
+        {"msg_type": "COMMAND", "command_type": "LAND", "agent_id": VALID_AGENT_ID}
+    )
+    assert cmd.command_type == "LAND"
+
+
+def test_frontend_command_rth():
+    cmd = FrontendCommand.model_validate(
+        {"msg_type": "COMMAND", "command_type": "RTH", "agent_id": VALID_AGENT_ID}
+    )
+    assert cmd.command_type == "RTH"
+
+
+def test_frontend_command_cut_motors():
+    cmd = FrontendCommand.model_validate(
+        {"msg_type": "COMMAND", "command_type": "CUT_MOTORS", "agent_id": VALID_AGENT_ID}
+    )
+    assert cmd.command_type == "CUT_MOTORS"
+
+
+def test_frontend_command_rejects_waypoint():
+    with pytest.raises(ValidationError):
+        FrontendCommand.model_validate(
+            {
+                "msg_type": "COMMAND",
+                "command_type": "GO_TO_WAYPOINT",
+                "agent_id": VALID_AGENT_ID,
+            }
+        )
+
+
+def test_command_dispatch_has_no_payload():
+    dispatch = CommandDispatch.model_validate(
+        {
+            "command_id": VALID_AGENT_ID,
+            "command_type": "RTH",
+            "issued_at": "2026-05-03T10:00:00Z",
+        }
+    )
+    assert dispatch.msg_type == "COMMAND"
+    assert not hasattr(dispatch, "payload")

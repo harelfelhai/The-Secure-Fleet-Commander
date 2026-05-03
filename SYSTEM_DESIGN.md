@@ -3,18 +3,26 @@
 > **This file is the canonical source of truth for the project.**
 > All architectural decisions, schemas, and contracts live here first.
 > Code must conform to this document, not the other way around.
-> The Decision Log (§8) is append-only — never delete a row.
+> The Decision Log (§9) is append-only — never delete a row.
 
 ---
 
 ## 1. MVP Scope & Constraints
 
+### System Philosophy: Safety Monitor
+
+The system is a **Safety Monitor**, not a flight management system. The drone is operated locally by a human pilot. This backend provides real-time constraint enforcement and emergency override capability only.
+
+- **The pilot flies the drone.** This system does not plan, schedule, or control missions.
+- **The backend monitors.** It checks every telemetry frame against geofence and battery constraints.
+- **Operators override.** The frontend provides emergency controls, not mission planning.
+
 ### In Scope (MVP)
 - A **Gateway** process that connects to a physical or simulated drone, normalises data to a 6-field telemetry frame, and streams it to the Backend over an authenticated WebSocket.
-- A **Backend** (FastAPI) that ingests telemetry, persists it, evaluates a No-Fly Zone rule, and fans out live data to connected Frontend clients.
-- A **Frontend** (React) that renders all active agents on a map, shows a heartbeat-based staleness indicator, and lets operators send a single `GO_TO_WAYPOINT` command via click-to-interact.
-- **One command**: `GO_TO_WAYPOINT` — bi-directional, acknowledged.
-- **One policy rule**: No-Fly Zone point-in-polygon check — logs a violation on breach; no auto-command in MVP.
+- A **Backend** (FastAPI) that ingests telemetry, persists it, evaluates geofence and battery rules, and fans out live data + alerts to connected Frontend clients.
+- A **Frontend** (React) that renders all active agents on a map, shows link status and staleness, and lets operators issue emergency overrides.
+- **Three emergency override commands**: `LAND`, `RTH` (Return To Home), `CUT_MOTORS` — bi-directional, acknowledged. No parameters; the drone's local autopilot executes them.
+- **Two policy rules**: No-Fly Zone (geofence) and Low Battery — both log violations and push alerts. No automated command in MVP.
 
 ### Explicitly Deferred
 | Feature | Reason |
@@ -22,10 +30,10 @@
 | mTLS between Gateway and Backend | JWT is sufficient to prove the auth pattern; mTLS adds PKI complexity |
 | User accounts / RBAC | Not needed until multi-operator scenario |
 | Auto-command on geofence breach | Logging the violation proves the evaluator; auto-RTH is next milestone |
-| Additional commands (RTH, ARM, LAND) | Adding a second command is trivial once the command pipeline exists |
 | Full policy DSL | Over-engineering before we know the rule shape |
 | Delta compression / PostGIS LineString | Premature optimisation; breadcrumbs prove the pattern |
 | TimescaleDB hypertables | Plain PostgreSQL table with index is sufficient for MVP load |
+| Waypoint / mission planning | Out of scope — pilot controls flight path locally |
 
 ---
 
@@ -48,8 +56,9 @@ graph TB
         WS_GW[Gateway WebSocket\n/ws/gateway/{hardware_id}]
         INGEST[Ingestion Service\nValidate → Persist → Evaluate]
         GEO[No-Fly Zone Evaluator\nShapely point-in-polygon]
+        RULES[Rules Engine\nGeofence + Low Battery]
         VLOG[ViolationLog Writer]
-        CMD[Command Dispatcher\nGO_TO_WAYPOINT only]
+        CMD[Emergency Command Dispatcher\nLAND | RTH | CUT_MOTORS]
         REST[REST API]
         ORM[SQLAlchemy ORM]
         PG[(PostgreSQL)]
@@ -57,25 +66,27 @@ graph TB
 
         WS_GW --> INGEST
         INGEST --> ORM
-        INGEST --> GEO
+        INGEST --> RULES
+        RULES --> GEO
         GEO -->|violation| VLOG
         VLOG --> ORM
         CMD --> WS_GW
         REST --> ORM
         ORM --> PG
         INGEST -->|fan-out| WS_FE
+        RULES -->|alert| WS_FE
     end
 
     subgraph FRONTEND ["Frontend (React)"]
         MAP[Leaflet Map\nAll active agents]
-        HB[Heartbeat Monitor\nGray icon after Xs]
-        PANEL[Agent Panel\nStats + GO_TO form]
+        HB[Heartbeat Monitor\nLink status indicator]
+        PANEL[Agent Panel\nStats + Emergency Controls]
         WS_CLI[WebSocket Client]
 
         WS_CLI --> MAP
         WS_CLI --> HB
         MAP -->|click| PANEL
-        PANEL -->|GO_TO_WAYPOINT| WS_CLI
+        PANEL -->|LAND / RTH / CUT_MOTORS| WS_CLI
     end
 
     TUNNEL <-->|WSS + JWT| WS_GW
@@ -87,10 +98,10 @@ graph TB
 | Layer | Responsibility |
 |---|---|
 | **Gateway** | Translate raw device protocol to 6-field JSON, buffer when offline, authenticate and stream to Backend. No business logic. |
-| **Ingestion Service** | Validate the inbound frame, write breadcrumb + update `last_seen_at`, trigger zone evaluation, fan-out to frontend. |
+| **Ingestion Service** | Validate the inbound frame, write breadcrumb + update `last_seen_at`, trigger rules evaluation, fan-out to frontend. |
 | **No-Fly Zone Evaluator** | Pure function — `(lat, lon, zones[]) → bool`. Side-effectless; caller writes the `ViolationLog`. |
-| **Command Dispatcher** | Receive `GO_TO_WAYPOINT` from frontend WS, validate, write `CommandLog`, push `COMMAND_DISPATCH` to Gateway WS. |
-| **Frontend** | Display live fleet state, dim stale agents, surface a command form on agent click. |
+| **Emergency Command Dispatcher** | Receive `LAND / RTH / CUT_MOTORS` from frontend WS, validate, write `CommandLog`, push `COMMAND_DISPATCH` to Gateway WS. |
+| **Frontend** | Display live fleet state, show link/battery status, surface emergency override buttons on agent click. |
 
 ### Technology Choices
 | Component | Choice | Rationale |
@@ -112,12 +123,21 @@ graph TB
 ### 3.1 Entity Relationship
 
 ```
-Agent (1) ──< FlightSession (1) ──< GpsBreadcrumb (N)
+Gateway (1) ──< Agent (N) ──< FlightSession (1) ──< GpsBreadcrumb (N)
 Agent (1) ──< CommandLog (N)
 Agent (1) ──< ViolationLog (N)
 ```
 
 ### 3.2 Model Definitions
+
+#### `gateways`
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID PK | `default=uuid4` |
+| hardware_id | TEXT UNIQUE NOT NULL | Physical gateway device fingerprint |
+| display_name | TEXT NOT NULL | Human-readable label |
+| registered_at | TIMESTAMPTZ | `default=utcnow` |
+| last_connected_at | TIMESTAMPTZ nullable | Updated on every WS connect |
 
 #### `agents`
 | Column | Type | Notes |
@@ -128,6 +148,8 @@ Agent (1) ──< ViolationLog (N)
 | device_type | TEXT NOT NULL | Default: `"DRONE"` |
 | registered_at | TIMESTAMPTZ | `default=utcnow` |
 | last_seen_at | TIMESTAMPTZ nullable | Updated on every telemetry frame |
+| gateway_id | UUID FK→gateways nullable | Which gateway is relaying this agent's telemetry |
+| link_status | TEXT NOT NULL | `LINKED \| RADIO_LOST \| CLOUD_LOST` — default `LINKED` |
 
 #### `flight_sessions`
 | Column | Type | Notes |
@@ -141,7 +163,7 @@ Agent (1) ──< ViolationLog (N)
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID PK | |
-| session_id | UUID FK→flight_sessions | NOT NULL |
+| session_id | UUID FK→flight_sessions | NOT NULL — explicitly links each point to a session |
 | agent_id | UUID FK→agents | Denormalised for query speed |
 | recorded_at | TIMESTAMPTZ | NOT NULL |
 | latitude | DOUBLE PRECISION | NOT NULL |
@@ -154,8 +176,8 @@ Agent (1) ──< ViolationLog (N)
 |---|---|---|
 | id | UUID PK | |
 | agent_id | UUID FK→agents | NOT NULL |
-| command_type | TEXT NOT NULL | MVP: `"GO_TO_WAYPOINT"` only |
-| payload | JSONB NOT NULL | `{"latitude": ..., "longitude": ..., "altitude_m": ...}` |
+| command_type | TEXT(20) NOT NULL | `LAND \| RTH \| CUT_MOTORS` |
+| payload | JSONB NOT NULL | `{}` — emergency commands carry no coordinate parameters |
 | status | TEXT | `SENT \| ACKNOWLEDGED \| FAILED \| TIMEOUT` |
 | issued_at | TIMESTAMPTZ | `default=utcnow` |
 | acked_at | TIMESTAMPTZ nullable | |
@@ -180,6 +202,9 @@ CREATE INDEX idx_sessions_agent_active ON flight_sessions (agent_id) WHERE ended
 
 -- Command history per agent
 CREATE INDEX idx_commands_agent ON command_logs (agent_id, issued_at DESC);
+
+-- Agents by gateway (bulk update on disconnect)
+CREATE INDEX idx_agents_gateway ON agents (gateway_id);
 ```
 
 ### 3.4 Alembic Strategy
@@ -211,20 +236,19 @@ CREATE INDEX idx_commands_agent ON command_logs (agent_id, issued_at DESC);
 
 > `agent_id` here is the UUID issued by the Backend on first registration. The Gateway stores it after the handshake.
 
-### 4.2 `GO_TO_WAYPOINT` — Frontend → Backend (`/ws/fleet/live`)
+### 4.2 `COMMAND` — Frontend → Backend (`/ws/fleet/live`)
+
+Emergency override commands only. No coordinate parameters — the drone's local autopilot handles execution.
 
 ```json
 {
   "msg_type": "COMMAND",
-  "command_type": "GO_TO_WAYPOINT",
-  "agent_id": "<uuid>",
-  "payload": {
-    "latitude": 32.09,
-    "longitude": 34.78,
-    "altitude_m": 50.0
-  }
+  "command_type": "LAND",
+  "agent_id": "<uuid>"
 }
 ```
+
+Valid `command_type` values: `LAND | RTH | CUT_MOTORS`
 
 ### 4.3 `COMMAND_DISPATCH` — Backend → Gateway (`/ws/gateway/{hardware_id}`)
 
@@ -232,12 +256,7 @@ CREATE INDEX idx_commands_agent ON command_logs (agent_id, issued_at DESC);
 {
   "msg_type": "COMMAND",
   "command_id": "<uuid>",
-  "command_type": "GO_TO_WAYPOINT",
-  "payload": {
-    "latitude": 32.09,
-    "longitude": 34.78,
-    "altitude_m": 50.0
-  },
+  "command_type": "LAND",
   "issued_at": "<ISO-8601 UTC>"
 }
 ```
@@ -269,13 +288,15 @@ Valid `status` values: `ACKNOWLEDGED | FAILED | REJECTED`
       "altitude_m": 120.5,
       "battery_pct": 74.2,
       "last_seen_at": "<ISO-8601 UTC>",
-      "status": "ONLINE"
+      "status": "ONLINE",
+      "link_status": "LINKED"
     }
   ]
 }
 ```
 
-`status` is computed server-side: `ONLINE` if `(now - last_seen_at) < HEARTBEAT_TIMEOUT_SECONDS`, else `STALE`.
+`status` values: `ONLINE | STALE` (computed server-side from `last_seen_at` recency)
+`link_status` values: `LINKED | RADIO_LOST | CLOUD_LOST` (set by protocol events — see §4.7)
 
 ### 4.6 `ALERT` — Backend → Frontend
 
@@ -300,7 +321,29 @@ Unified alert message covering all rule-triggered events. `alert_type` discrimin
 **`GEOFENCE_VIOLATION` context fields**: `zone_name: str`
 **`LOW_BATTERY` context fields**: `battery_pct: float`, `threshold_pct: float`
 
-### 4.7 Schema Versioning Policy
+### 4.7 `LINK_STATUS` — Gateway → Backend
+
+Sent when the gateway detects a change in its radio link to a field agent. The gateway's cloud WebSocket remains connected; only the field radio link changed.
+
+```json
+{
+  "msg_type": "LINK_STATUS",
+  "agent_id": "<uuid>",
+  "link_status": "RADIO_LOST",
+  "detected_at": "<ISO-8601 UTC>"
+}
+```
+
+Valid `link_status` values: `LINKED | RADIO_LOST`
+
+**Disconnect taxonomy:**
+
+| Event | Who detects | How backend knows | `link_status` result |
+|---|---|---|---|
+| Field radio failure | Gateway (radio timeout) | `LINK_STATUS` message | `RADIO_LOST` |
+| Gateway WS drop | Backend (disconnect exception) | WS disconnect handler | `CLOUD_LOST` for all agents on that gateway |
+
+### 4.8 Schema Versioning Policy
 - The `schema_version` field is checked on every inbound frame. Unknown versions are rejected with a `400`-equivalent WS close code.
 - Minor additions (new optional fields) increment the minor version: `"1.1"`.
 - Breaking changes increment the major version and require a migration plan.
@@ -402,7 +445,7 @@ class AbstractDeviceAdapter(ABC):
 
 ---
 
-## 8. Decision Log
+## 9. Decision Log
 
 | # | Date | Decision | Alternatives Considered | Rationale |
 |---|---|---|---|---|
@@ -418,68 +461,5 @@ class AbstractDeviceAdapter(ABC):
 | 10 | 2026-05-01 | Geofence + low-battery alerts are edge-triggered with dedup | Alert every frame | At 1 Hz a non-deduped alert would produce 3600 rows/hour per agent inside a zone |
 | 11 | 2026-05-01 | Low-battery alerts not persisted (transient UI only) | New `alert_logs` table | Avoids schema churn; ViolationLog covers the compliance-relevant case |
 | 12 | 2026-05-01 | JWT implemented with stdlib hmac/hashlib (no PyJWT/jose) | PyJWT or python-jose | Both pull in `cryptography` which has broken native extensions in some environments; HS256 is trivial to implement correctly with stdlib |
-
----
-
-## 9. Testing Strategy
-
-### Unit Tests (no I/O)
-- `NoFlyZoneEvaluator`: point inside zone, point outside zone, point on boundary, multiple zones.
-- `TelemetryFrame` Pydantic schema: valid frame, missing field, wrong type, future timestamp.
-- `MavlinkDroneAdapter` / `SimulatedDroneAdapter`: output conforms to `TelemetryFrame` schema.
-- Offline buffer: FIFO ordering, drain sequence, persistence across restart.
-
-### Integration Tests (real DB, test containers)
-- Telemetry ingest: POST 10 frames → assert 10 `GpsBreadcrumb` rows, `Agent.last_seen_at` updated.
-- Session lifecycle: WS connect → session opened; WS disconnect → `ended_at` set.
-- Command round-trip: frontend WS sends `GO_TO_WAYPOINT` → `CommandLog` row `SENT` → simulated Gateway ACK → status `ACKNOWLEDGED`.
-- Violation detection: frame inside zone → `ViolationLog` row written + `VIOLATION_ALERT` pushed to frontend WS client.
-
-### E2E Smoke Test
-- Start Simulator + Backend + Frontend.
-- Assert agent marker appears on map within 3 seconds.
-- Click marker, submit `GO_TO_WAYPOINT` → assert `CommandLog` row with status `SENT`.
-
----
-
-## 10. Local Dev Setup
-
-### Prerequisites
-- Docker + Docker Compose v2
-- Python 3.11+
-- Node.js 20+
-
-### Start the Stack
-```bash
-# 1. Start PostgreSQL
-cd infra && docker compose up -d
-
-# 2. Install backend deps and run migrations
-cd backend
-pip install -e ".[dev]"
-alembic upgrade head
-
-# 3. Start backend
-uvicorn app.main:app --reload --port 8000
-
-# 4. Start gateway simulator
-cd gateway
-pip install -e ".[dev]"
-python -m app.main --mode simulate
-
-# 5. Start frontend
-cd frontend
-npm install
-npm run dev
-# Opens at http://localhost:5173
-```
-
-### Environment Variables
-Copy `backend/.env.example` to `backend/.env` and adjust:
-```
-DATABASE_URL=postgresql+asyncpg://fleet:fleet@localhost:5432/fleet_commander
-JWT_SECRET=change-me-in-development
-HEARTBEAT_TIMEOUT_SECONDS=10
-ZONES_CONFIG_PATH=../shared/schemas/zones.json
-DEBUG=true
-```
+| 13 | 2026-05-03 | Separate Gateway model from Agent; add `link_status` (LINKED/RADIO_LOST/CLOUD_LOST) | Derive disconnect type from `last_seen_at` alone | Cloud disconnect (WS drop) and field disconnect (radio loss) have different operational responses; conflating them via timestamp forces operators to guess the cause |
+| 14 | 2026-05-03 | Replace `GO_TO_WAYPOINT` with `LAND \| RTH \| CUT_MOTORS`; drop waypoint/mission planning | Keep GO_TO_WAYPOINT as the one command | System is a Safety Monitor: pilot controls flight path locally; backend only enforces constraints and provides emergency override; navigation commands create liability if backend state diverges from physical state |

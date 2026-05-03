@@ -96,8 +96,8 @@ class CommandLog(Base):
     agent_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("agents.id"), nullable=False
     )
-    command_type: Mapped[str] = mapped_column(String(50), nullable=False, default="GO_TO_WAYPOINT")
-    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    command_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="SENT")
     issued_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
