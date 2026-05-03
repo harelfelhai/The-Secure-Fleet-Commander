@@ -57,6 +57,19 @@ class AckFrame(BaseModel):
     acked_at: datetime
 
 
+class LinkStatusMessage(BaseModel):
+    """
+    Inbound from Gateway → Backend.
+    Sent when the gateway detects a change in its radio link to a specific field agent.
+    The gateway remains cloud-connected; only the field radio link changed.
+    """
+
+    msg_type: Literal["LINK_STATUS"]
+    agent_id: str
+    link_status: Literal["LINKED", "RADIO_LOST"]
+    detected_at: datetime
+
+
 class AgentStatus(BaseModel):
     agent_id: str
     display_name: str
@@ -66,6 +79,7 @@ class AgentStatus(BaseModel):
     battery_pct: float
     last_seen_at: datetime
     status: Literal["ONLINE", "STALE"]
+    link_status: Literal["LINKED", "RADIO_LOST", "CLOUD_LOST"] = "LINKED"
 
 
 class FleetUpdate(BaseModel):

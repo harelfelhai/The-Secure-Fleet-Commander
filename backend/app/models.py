@@ -9,6 +9,24 @@ from sqlalchemy.sql import func
 from app.database import Base
 
 
+class Gateway(Base):
+    """A physical gateway device that bridges field agents to the cloud over radio."""
+
+    __tablename__ = "gateways"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    hardware_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    registered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    last_connected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    agents: Mapped[list["Agent"]] = relationship(back_populates="gateway")
+
+
 class Agent(Base):
     __tablename__ = "agents"
 
@@ -20,7 +38,12 @@ class Agent(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    gateway_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("gateways.id"), nullable=True
+    )
+    link_status: Mapped[str] = mapped_column(String(20), nullable=False, default="LINKED")
 
+    gateway: Mapped["Gateway | None"] = relationship(back_populates="agents")
     sessions: Mapped[list["FlightSession"]] = relationship(back_populates="agent")
     breadcrumbs: Mapped[list["GpsBreadcrumb"]] = relationship(back_populates="agent")
     command_logs: Mapped[list["CommandLog"]] = relationship(back_populates="agent")

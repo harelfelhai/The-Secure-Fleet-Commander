@@ -33,6 +33,7 @@ class IngestionContext:
     session_id: UUID
     agent_id: UUID
     display_name: str
+    gateway_hardware_id: str | None = None
 
 
 class IngestionService:
@@ -72,6 +73,7 @@ class IngestionService:
                 "battery_pct": frame.battery_pct,
                 "last_seen_at": frame.timestamp,
             },
+            gateway_hardware_id=ctx.gateway_hardware_id,
         )
         try:
             await self._broadcaster.broadcast_fleet_update()

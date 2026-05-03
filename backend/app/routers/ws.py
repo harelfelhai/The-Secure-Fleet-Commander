@@ -19,8 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.ws_auth import authenticate_gateway_ws
 from app.database import AsyncSessionLocal
 from app.dependencies import get_broadcaster, get_rules_engine
-from app.models import Agent, FlightSession
-from app.schemas.messages import TelemetryFrame
+from app.models import Agent, FlightSession, Gateway
+from app.schemas.messages import LinkStatusMessage, TelemetryFrame
 from app.services.broadcaster import FleetBroadcaster
 from app.services.connection_manager import frontend_manager, gateway_manager
 from app.services.ingestion import IngestionContext, IngestionService
@@ -34,7 +34,26 @@ router = APIRouter(tags=["websocket"])
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-async def _upsert_agent(db: AsyncSession, hardware_id: str) -> Agent:
+async def _upsert_gateway(db: AsyncSession, hardware_id: str) -> Gateway:
+    """Return existing Gateway or create a new one; always refreshes last_connected_at."""
+    result = await db.execute(select(Gateway).where(Gateway.hardware_id == hardware_id))
+    gw = result.scalar_one_or_none()
+    if gw is None:
+        gw = Gateway(
+            hardware_id=hardware_id,
+            display_name=hardware_id,
+            last_connected_at=datetime.now(UTC),
+        )
+        db.add(gw)
+    else:
+        gw.last_connected_at = datetime.now(UTC)
+    await db.flush()
+    return gw
+
+
+async def _upsert_agent(
+    db: AsyncSession, hardware_id: str, gateway_id: uuid.UUID | None = None
+) -> Agent:
     """Return existing Agent or create a new one for this hardware_id."""
     result = await db.execute(select(Agent).where(Agent.hardware_id == hardware_id))
     agent = result.scalar_one_or_none()
@@ -42,9 +61,14 @@ async def _upsert_agent(db: AsyncSession, hardware_id: str) -> Agent:
         agent = Agent(
             hardware_id=hardware_id,
             display_name=hardware_id,  # default; operator can rename via API later
+            gateway_id=gateway_id,
+            link_status="LINKED",
         )
         db.add(agent)
-        await db.flush()  # populate agent.id before we return
+    else:
+        agent.gateway_id = gateway_id
+        agent.link_status = "LINKED"
+    await db.flush()  # populate agent.id before we return
     return agent
 
 
@@ -90,12 +114,14 @@ async def gateway_ws(
     if not await authenticate_gateway_ws(websocket, hardware_id):
         return
 
-    # ── 2. Upsert agent + open session (short-lived setup transaction) ────────
+    # ── 2. Upsert gateway + agent + open session (short-lived setup transaction)
     async with AsyncSessionLocal() as db:
         async with db.begin():
-            agent = await _upsert_agent(db, hardware_id)
+            gateway = await _upsert_gateway(db, hardware_id)
+            agent = await _upsert_agent(db, hardware_id, gateway_id=gateway.id)
             session = await _open_session(db, agent.id)
 
+    gateway_id = gateway.id
     agent_id = agent.id
     agent_display_name = agent.display_name
     session_id = session.id
@@ -103,6 +129,7 @@ async def gateway_ws(
         session_id=session_id,
         agent_id=agent_id,
         display_name=agent_display_name,
+        gateway_hardware_id=hardware_id,
     )
 
     # ── 3. Register + notify client ───────────────────────────────────────────
@@ -114,7 +141,12 @@ async def gateway_ws(
             "session_id": str(session_id),
         }
     )
-    logger.info("Gateway ready: hardware_id=%s agent_id=%s", hardware_id, agent_id)
+    logger.info(
+        "Gateway ready: hardware_id=%s gateway_id=%s agent_id=%s",
+        hardware_id,
+        gateway_id,
+        agent_id,
+    )
 
     # ── 4. Message loop ───────────────────────────────────────────────────────
     from app.config import settings  # local import avoids circular at module level
@@ -169,6 +201,27 @@ async def gateway_ws(
                     except Exception:
                         logger.error("Ingest failed for agent %s", agent_id, exc_info=True)
 
+                elif msg_type == "LINK_STATUS":
+                    try:
+                        link_msg = LinkStatusMessage.model_validate(data)
+                    except ValidationError as exc:
+                        logger.warning(
+                            "LINK_STATUS validation failed from %s: %s", hardware_id, exc
+                        )
+                        continue
+
+                    broadcaster.mark_link_status(link_msg.agent_id, link_msg.link_status)
+                    logger.info(
+                        "Link status update: gateway=%s agent=%s status=%s",
+                        hardware_id,
+                        link_msg.agent_id,
+                        link_msg.link_status,
+                    )
+                    try:
+                        await broadcaster.broadcast_fleet_update()
+                    except Exception:
+                        logger.error("Fleet broadcast after LINK_STATUS failed", exc_info=True)
+
                 elif msg_type == "ACK":
                     # Milestone 2: update CommandLog status on ACK
                     pass
@@ -183,7 +236,8 @@ async def gateway_ws(
             watchdog_task.cancel()
         gateway_manager.disconnect(hardware_id)
         rules_engine.clear_agent_state(str(agent_id))
-        broadcaster.mark_stale(str(agent_id))
+        # Cloud disconnect: gateway WS dropped → all agents on this gateway lose cloud link
+        broadcaster.mark_cloud_lost(hardware_id)
         await _close_session(session_id)
         try:
             await broadcaster.broadcast_fleet_update()
