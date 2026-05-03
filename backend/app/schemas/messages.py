@@ -40,6 +40,24 @@ class CommandDispatch(BaseModel):
     issued_at: datetime
 
 
+class CommandSent(BaseModel):
+    """Outbound Backend → Frontend (originating client only). Command accepted and dispatched."""
+
+    msg_type: Literal["COMMAND_SENT"] = "COMMAND_SENT"
+    command_id: str
+    agent_id: str
+    command_type: Literal["LAND", "RTH", "CUT_MOTORS"]
+    issued_at: datetime
+
+
+class CommandError(BaseModel):
+    """Outbound Backend → Frontend (originating client only). Command could not be dispatched."""
+
+    msg_type: Literal["COMMAND_ERROR"] = "COMMAND_ERROR"
+    agent_id: str | None = None
+    reason: str
+
+
 class AckFrame(BaseModel):
     """Inbound from Gateway → Backend."""
 

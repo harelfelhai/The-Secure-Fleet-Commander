@@ -19,9 +19,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.ws_auth import authenticate_gateway_ws
 from app.database import AsyncSessionLocal
 from app.dependencies import get_broadcaster, get_rules_engine
-from app.models import Agent, FlightSession, Gateway
-from app.schemas.messages import LinkStatusMessage, TelemetryFrame
+from app.models import Agent, CommandLog, FlightSession, Gateway
+from app.schemas.messages import (
+    AckFrame,
+    CommandError,
+    CommandSent,
+    FrontendCommand,
+    LinkStatusMessage,
+    TelemetryFrame,
+)
 from app.services.broadcaster import FleetBroadcaster
+from app.services.command_service import CommandService
 from app.services.connection_manager import frontend_manager, gateway_manager
 from app.services.ingestion import IngestionContext, IngestionService
 from app.services.rules_engine import RulesEngine
@@ -86,6 +94,27 @@ async def _close_session(session_id: uuid.UUID) -> None:
             session = result.scalar_one_or_none()
             if session:
                 session.ended_at = datetime.now(UTC)
+
+
+async def _handle_ack(ack: AckFrame) -> None:
+    """Persist ACK result — update CommandLog status and acked_at."""
+    try:
+        command_id = uuid.UUID(ack.command_id)
+    except ValueError:
+        logger.warning("ACK with invalid command_id format: %s", ack.command_id)
+        return
+
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            result = await db.execute(select(CommandLog).where(CommandLog.id == command_id))
+            log = result.scalar_one_or_none()
+            if log is None:
+                logger.warning("ACK for unknown command_id %s", ack.command_id)
+                return
+            log.status = ack.status
+            log.acked_at = ack.acked_at
+
+    logger.info("Command %s → %s", ack.command_id, ack.status)
 
 
 async def _watchdog(websocket: WebSocket, timeout: int, hardware_id: str) -> None:
@@ -223,8 +252,19 @@ async def gateway_ws(
                         logger.error("Fleet broadcast after LINK_STATUS failed", exc_info=True)
 
                 elif msg_type == "ACK":
-                    # Milestone 2: update CommandLog status on ACK
-                    pass
+                    try:
+                        ack = AckFrame.model_validate(data)
+                    except ValidationError as exc:
+                        logger.warning("ACK validation failed from %s: %s", hardware_id, exc)
+                        continue
+                    try:
+                        await _handle_ack(ack)
+                    except Exception:
+                        logger.error(
+                            "ACK handling failed for command %s",
+                            data.get("command_id"),
+                            exc_info=True,
+                        )
 
                 else:
                     logger.debug("Unknown msg_type '%s' from %s", msg_type, hardware_id)
@@ -267,8 +307,46 @@ async def fleet_ws(
             msg_type = data.get("msg_type")
 
             if msg_type == "COMMAND":
-                # Milestone 2: validate + dispatch GO_TO_WAYPOINT
-                pass
+                try:
+                    cmd = FrontendCommand.model_validate(data)
+                except ValidationError as exc:
+                    await websocket.send_text(
+                        CommandError(
+                            agent_id=data.get("agent_id"), reason=f"invalid command: {exc}"
+                        ).model_dump_json()
+                    )
+                    continue
+
+                try:
+                    async with AsyncSessionLocal() as db:
+                        svc = CommandService(db=db, gw_manager=gateway_manager)
+                        log, error = await svc.dispatch(cmd)
+                except Exception:
+                    logger.error(
+                        "Command dispatch failed for agent %s",
+                        data.get("agent_id"),
+                        exc_info=True,
+                    )
+                    await websocket.send_text(
+                        CommandError(
+                            agent_id=data.get("agent_id"), reason="internal error"
+                        ).model_dump_json()
+                    )
+                    continue
+
+                if error:
+                    await websocket.send_text(
+                        CommandError(agent_id=cmd.agent_id, reason=error).model_dump_json()
+                    )
+                else:
+                    await websocket.send_text(
+                        CommandSent(
+                            command_id=str(log.id),
+                            agent_id=cmd.agent_id,
+                            command_type=log.command_type,  # type: ignore[arg-type]
+                            issued_at=log.issued_at,
+                        ).model_dump_json()
+                    )
             else:
                 logger.debug("Unknown frontend msg_type: %s", msg_type)
 

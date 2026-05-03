@@ -6,7 +6,14 @@ Covers the TELEMETRY frame (primary inbound) and emergency COMMAND schemas.
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.messages import CommandDispatch, FrontendCommand, TelemetryFrame
+from app.schemas.messages import (
+    AckFrame,
+    CommandDispatch,
+    CommandError,
+    CommandSent,
+    FrontendCommand,
+    TelemetryFrame,
+)
 
 VALID_FRAME = {
     "msg_type": "TELEMETRY",
@@ -116,3 +123,54 @@ def test_command_dispatch_has_no_payload():
     )
     assert dispatch.msg_type == "COMMAND"
     assert not hasattr(dispatch, "payload")
+
+
+# ── ACK, CommandSent, CommandError schemas ────────────────────────────────────
+
+
+def test_ack_frame_valid():
+    ack = AckFrame.model_validate(
+        {
+            "msg_type": "ACK",
+            "command_id": VALID_AGENT_ID,
+            "status": "ACKNOWLEDGED",
+            "acked_at": "2026-05-03T10:00:01Z",
+        }
+    )
+    assert ack.status == "ACKNOWLEDGED"
+
+
+def test_ack_frame_rejects_unknown_status():
+    with pytest.raises(ValidationError):
+        AckFrame.model_validate(
+            {
+                "msg_type": "ACK",
+                "command_id": VALID_AGENT_ID,
+                "status": "OK",
+                "acked_at": "2026-05-03T10:00:01Z",
+            }
+        )
+
+
+def test_command_sent_schema():
+    msg = CommandSent.model_validate(
+        {
+            "command_id": VALID_AGENT_ID,
+            "agent_id": VALID_AGENT_ID,
+            "command_type": "LAND",
+            "issued_at": "2026-05-03T10:00:00Z",
+        }
+    )
+    assert msg.msg_type == "COMMAND_SENT"
+    assert msg.command_type == "LAND"
+
+
+def test_command_error_schema_with_agent():
+    msg = CommandError(agent_id=VALID_AGENT_ID, reason="gateway offline")
+    assert msg.msg_type == "COMMAND_ERROR"
+    assert msg.agent_id == VALID_AGENT_ID
+
+
+def test_command_error_schema_without_agent():
+    msg = CommandError(reason="invalid command")
+    assert msg.agent_id is None
