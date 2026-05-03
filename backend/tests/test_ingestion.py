@@ -64,18 +64,47 @@ def fresh_ctx() -> IngestionContext:
 
 
 @pytest.mark.asyncio
-async def test_first_frame_always_persisted():
+async def test_new_session_first_frame_always_persisted():
+    """
+    Case 1: New session / reconnect.
+    IngestionContext is created fresh (last_persisted_at=None) on every gateway WS connect.
+    The very first frame must be written to DB to anchor the flight path start.
+    """
     svc, db, rules, broadcaster = make_service()
     ctx = fresh_ctx()
+    assert ctx.last_persisted_at is None  # fresh session, no prior persists
+
     await svc.ingest(FRAME, ctx)
 
-    db.add.assert_called_once()  # GpsBreadcrumb written
-    db.execute.assert_called_once()  # Agent.last_seen_at updated
+    db.add.assert_called_once()
+    db.execute.assert_called_once()
     assert ctx.last_persisted_at is not None
 
 
 @pytest.mark.asyncio
-async def test_frame_within_interval_not_persisted():
+async def test_post_silence_recovery_frame_persisted():
+    """
+    Case 2: Post-silence recovery.
+    If the gateway went quiet for longer than persist_interval, the next frame that
+    arrives must be persisted immediately to mark the start of the new movement segment.
+    Elapsed since last persist (5 s) >> persist_interval (2 s) → always persisted.
+    """
+    svc, db, rules, broadcaster = make_service(persist_interval=2.0)
+    ctx = fresh_ctx()
+    ctx.last_persisted_at = datetime.now(UTC) - timedelta(seconds=5.0)  # 5 s silence
+
+    await svc.ingest(FRAME, ctx)
+
+    db.add.assert_called_once()
+    db.execute.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_short_gap_within_interval_not_persisted():
+    """
+    A brief packet drop shorter than the persist interval is NOT treated as a
+    segment boundary — it is just a normal skipped frame.
+    """
     svc, db, rules, broadcaster = make_service(persist_interval=2.0)
     ctx = fresh_ctx()
     ctx.last_persisted_at = datetime.now(UTC) - timedelta(seconds=0.5)

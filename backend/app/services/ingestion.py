@@ -45,6 +45,9 @@ class IngestionContext:
     last_persisted_at: datetime | None = field(default=None, compare=False)
 
 
+_SILENCE_THRESHOLD = 5.0  # seconds — gap larger than this is logged as a segment boundary
+
+
 class IngestionService:
     def __init__(
         self,
@@ -96,6 +99,10 @@ class IngestionService:
             else float("inf")
         )
         if elapsed >= self._persist_interval or bool(alerts):
+            if ctx.last_persisted_at is None:
+                logger.info("Segment start for agent %s (new session)", ctx.agent_id)
+            elif elapsed >= _SILENCE_THRESHOLD:
+                logger.info("Segment boundary for agent %s (silence=%.1fs)", ctx.agent_id, elapsed)
             await self._persist(frame, ctx)
             ctx.last_persisted_at = now
             logger.debug(
