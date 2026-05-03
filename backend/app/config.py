@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     battery_warn_pct: float = 20.0  # alert fires when battery drops below this
     battery_clear_pct: float = 25.0  # hysteresis — alert clears when battery rises above this
 
+    # Breadcrumb persistence throttle — write to DB at most once per interval,
+    # unless a rule fires (alerts always trigger a persist regardless of interval).
+    persist_interval_seconds: float = 2.0
+
     debug: bool = False
 
 

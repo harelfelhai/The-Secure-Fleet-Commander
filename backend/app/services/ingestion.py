@@ -1,19 +1,27 @@
 """
 IngestionService — orchestrates the full telemetry ingest pipeline for one frame.
 
-Step order (per technical plan):
-  1. Persist breadcrumb + update Agent.last_seen_at  (single transaction)
-  2. Run rules engine                                 (pure, no I/O)
-  3. For GEOFENCE_VIOLATION alerts: persist ViolationLog (separate transaction)
-  4. Broadcast all alerts to frontend
-  5. Update broadcaster state and fan-out FLEET_UPDATE
+Step order:
+  1. Evaluate rules engine   (always — pure, no I/O; dedup state must stay current)
+  2. Handle alerts           (always — ViolationLog for geofence, broadcast all alerts)
+  3. Broadcast FLEET_UPDATE  (always — every frame reaches the frontend for smooth UI)
+  4. Persist breadcrumb      (conditional — see below)
 
-If persistence (step 1) fails, an exception propagates to the caller.
-If the rules engine or broadcasting fails, it is logged but does not affect persistence.
+Persistence throttle (step 4):
+  A GpsBreadcrumb is written to the DB only if ANY of:
+    a) No breadcrumb has been written yet this session (first frame)
+    b) At least `persist_interval_seconds` have elapsed since the last write
+    c) The rules engine raised at least one alert on this frame
+       (alert frames are always persisted as evidence, regardless of interval)
+
+  Agent.last_seen_at is updated in the same transaction as the breadcrumb.
+
+If the breadcrumb write fails, an exception propagates to the caller.
+All other failures (rules, alerts, broadcast) are logged and swallowed.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -34,6 +42,7 @@ class IngestionContext:
     agent_id: UUID
     display_name: str
     gateway_hardware_id: str | None = None
+    last_persisted_at: datetime | None = field(default=None, compare=False)
 
 
 class IngestionService:
@@ -42,27 +51,26 @@ class IngestionService:
         db: AsyncSession,
         rules_engine: RulesEngine,
         broadcaster: FleetBroadcaster,
+        persist_interval_seconds: float = 2.0,
     ) -> None:
         self._db = db
         self._rules = rules_engine
         self._broadcaster = broadcaster
+        self._persist_interval = persist_interval_seconds
 
     async def ingest(self, frame: TelemetryFrame, ctx: IngestionContext) -> None:
-        # ── 1. Persist ────────────────────────────────────────────────────────
-        await self._persist(frame, ctx)
-
-        # ── 2. Evaluate rules ─────────────────────────────────────────────────
+        # ── 1. Evaluate rules (always) ────────────────────────────────────────
         try:
             alerts = self._rules.evaluate(frame)
         except Exception:
             logger.error("Rules engine failed for agent %s", ctx.agent_id, exc_info=True)
             alerts = []
 
-        # ── 3 & 4. Handle alerts ──────────────────────────────────────────────
+        # ── 2. Handle alerts (always) ─────────────────────────────────────────
         for alert in alerts:
             await self._handle_alert(alert, frame, ctx)
 
-        # ── 5. Fan-out FLEET_UPDATE ───────────────────────────────────────────
+        # ── 3. Fan-out FLEET_UPDATE (always) ──────────────────────────────────
         self._broadcaster.update_agent(
             agent_id=str(ctx.agent_id),
             display_name=ctx.display_name,
@@ -79,6 +87,30 @@ class IngestionService:
             await self._broadcaster.broadcast_fleet_update()
         except Exception:
             logger.error("Fleet broadcast failed", exc_info=True)
+
+        # ── 4. Conditionally persist breadcrumb ───────────────────────────────
+        now = datetime.now(UTC)
+        elapsed = (
+            (now - ctx.last_persisted_at).total_seconds()
+            if ctx.last_persisted_at is not None
+            else float("inf")
+        )
+        if elapsed >= self._persist_interval or bool(alerts):
+            await self._persist(frame, ctx)
+            ctx.last_persisted_at = now
+            logger.debug(
+                "Persisted breadcrumb for agent %s (elapsed=%.2fs alerts=%d)",
+                ctx.agent_id,
+                elapsed,
+                len(alerts),
+            )
+        else:
+            logger.debug(
+                "Skipped breadcrumb for agent %s (elapsed=%.2fs < %.2fs)",
+                ctx.agent_id,
+                elapsed,
+                self._persist_interval,
+            )
 
     async def _persist(self, frame: TelemetryFrame, ctx: IngestionContext) -> None:
         async with self._db.begin():

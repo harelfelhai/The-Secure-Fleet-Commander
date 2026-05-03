@@ -194,7 +194,12 @@ async def gateway_ws(
 
     try:
         async with AsyncSessionLocal() as db:
-            ingest_svc = IngestionService(db, rules_engine, broadcaster)
+            ingest_svc = IngestionService(
+                db,
+                rules_engine,
+                broadcaster,
+                persist_interval_seconds=settings.persist_interval_seconds,
+            )
             while True:
                 raw = await websocket.receive_text()
                 reset_watchdog()

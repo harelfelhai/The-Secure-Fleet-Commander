@@ -4,6 +4,7 @@ All external dependencies (DB, rules engine, broadcaster) are replaced with mock
 """
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -28,12 +29,9 @@ FRAME = TelemetryFrame.model_validate(
     )
 )
 
-CTX = IngestionContext(session_id=SESSION_ID, agent_id=AGENT_ID, display_name="Alpha-1")
 
-
-def make_service():
+def make_service(persist_interval: float = 2.0):
     db = MagicMock()
-    # Simulate 'async with db.begin()' as a no-op async context manager
     begin_ctx = AsyncMock()
     begin_ctx.__aenter__ = AsyncMock(return_value=None)
     begin_ctx.__aexit__ = AsyncMock(return_value=False)
@@ -49,24 +47,96 @@ def make_service():
     broadcaster.broadcast_fleet_update = AsyncMock()
     broadcaster.broadcast_alert = AsyncMock()
 
-    svc = IngestionService(db=db, rules_engine=rules, broadcaster=broadcaster)
+    svc = IngestionService(
+        db=db,
+        rules_engine=rules,
+        broadcaster=broadcaster,
+        persist_interval_seconds=persist_interval,
+    )
     return svc, db, rules, broadcaster
 
 
-@pytest.mark.asyncio
-async def test_normal_ingest_persists_and_broadcasts():
-    svc, db, rules, broadcaster = make_service()
-    await svc.ingest(FRAME, CTX)
+def fresh_ctx() -> IngestionContext:
+    return IngestionContext(session_id=SESSION_ID, agent_id=AGENT_ID, display_name="Alpha-1")
 
-    db.add.assert_called_once()  # GpsBreadcrumb added
+
+# ── Throttle logic ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_first_frame_always_persisted():
+    svc, db, rules, broadcaster = make_service()
+    ctx = fresh_ctx()
+    await svc.ingest(FRAME, ctx)
+
+    db.add.assert_called_once()  # GpsBreadcrumb written
     db.execute.assert_called_once()  # Agent.last_seen_at updated
-    rules.evaluate.assert_called_once_with(FRAME)
+    assert ctx.last_persisted_at is not None
+
+
+@pytest.mark.asyncio
+async def test_frame_within_interval_not_persisted():
+    svc, db, rules, broadcaster = make_service(persist_interval=2.0)
+    ctx = fresh_ctx()
+    ctx.last_persisted_at = datetime.now(UTC) - timedelta(seconds=0.5)
+
+    await svc.ingest(FRAME, ctx)
+
+    db.add.assert_not_called()
+    db.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_frame_after_interval_is_persisted():
+    svc, db, rules, broadcaster = make_service(persist_interval=2.0)
+    ctx = fresh_ctx()
+    ctx.last_persisted_at = datetime.now(UTC) - timedelta(seconds=3.0)
+
+    await svc.ingest(FRAME, ctx)
+
+    db.add.assert_called_once()
+    db.execute.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_alert_frame_persisted_regardless_of_interval():
+    svc, db, rules, broadcaster = make_service(persist_interval=2.0)
+    rules.evaluate = MagicMock(
+        return_value=[
+            InternalAlert(
+                "LOW_BATTERY",
+                "WARNING",
+                "Battery low",
+                {"battery_pct": 15.0, "threshold_pct": 20.0},
+            )
+        ]
+    )
+    ctx = fresh_ctx()
+    ctx.last_persisted_at = datetime.now(UTC) - timedelta(seconds=0.5)  # within interval
+
+    await svc.ingest(FRAME, ctx)
+
+    db.add.assert_called_once()  # alert overrides throttle
+
+
+@pytest.mark.asyncio
+async def test_broadcast_always_happens_even_when_not_persisting():
+    svc, db, rules, broadcaster = make_service()
+    ctx = fresh_ctx()
+    ctx.last_persisted_at = datetime.now(UTC)  # just persisted → no persist this frame
+
+    await svc.ingest(FRAME, ctx)
+
+    db.add.assert_not_called()
     broadcaster.update_agent.assert_called_once()
     broadcaster.broadcast_fleet_update.assert_awaited_once()
 
 
+# ── Alert handling ────────────────────────────────────────────────────────────
+
+
 @pytest.mark.asyncio
-async def test_geofence_alert_persists_violation_log_and_broadcasts():
+async def test_geofence_alert_persists_violation_log_and_breadcrumb():
     svc, db, rules, broadcaster = make_service()
     rules.evaluate = MagicMock(
         return_value=[
@@ -78,16 +148,16 @@ async def test_geofence_alert_persists_violation_log_and_broadcasts():
             )
         ]
     )
+    ctx = fresh_ctx()
+    await svc.ingest(FRAME, ctx)
 
-    await svc.ingest(FRAME, CTX)
-
-    # db.add called twice: once for breadcrumb, once for violation log
+    # ViolationLog (via _handle_alert) + GpsBreadcrumb (alert-triggered persist)
     assert db.add.call_count == 2
     broadcaster.broadcast_alert.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_low_battery_alert_broadcasts_but_does_not_persist():
+async def test_low_battery_alert_broadcasts_and_persists_breadcrumb():
     svc, db, rules, broadcaster = make_service()
     rules.evaluate = MagicMock(
         return_value=[
@@ -99,12 +169,15 @@ async def test_low_battery_alert_broadcasts_but_does_not_persist():
             )
         ]
     )
+    ctx = fresh_ctx()
+    await svc.ingest(FRAME, ctx)
 
-    await svc.ingest(FRAME, CTX)
-
-    # db.add called only once (breadcrumb — no violation log for LOW_BATTERY)
+    # Breadcrumb persisted (alert-triggered), no ViolationLog for LOW_BATTERY
     assert db.add.call_count == 1
     broadcaster.broadcast_alert.assert_awaited_once()
+
+
+# ── Error isolation ───────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -112,9 +185,9 @@ async def test_rules_engine_error_does_not_prevent_fleet_update():
     svc, db, rules, broadcaster = make_service()
     rules.evaluate = MagicMock(side_effect=RuntimeError("boom"))
 
-    await svc.ingest(FRAME, CTX)
+    ctx = fresh_ctx()
+    await svc.ingest(FRAME, ctx)
 
-    # Fleet update still sent despite rules engine failure
     broadcaster.broadcast_fleet_update.assert_awaited_once()
 
 
@@ -123,5 +196,5 @@ async def test_broadcaster_error_does_not_propagate():
     svc, db, rules, broadcaster = make_service()
     broadcaster.broadcast_fleet_update = AsyncMock(side_effect=RuntimeError("network error"))
 
-    # Should not raise
-    await svc.ingest(FRAME, CTX)
+    ctx = fresh_ctx()
+    await svc.ingest(FRAME, ctx)  # must not raise
