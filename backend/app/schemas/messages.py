@@ -84,11 +84,13 @@ class LinkStatusMessage(BaseModel):
 class AgentStatus(BaseModel):
     agent_id: str
     display_name: str
+    device_type: Literal["DRONE", "ROVER"] = "DRONE"
     latitude: float
     longitude: float
     altitude_m: float
     battery_pct: float
     last_seen_at: datetime
+    mission_start_at: datetime | None = None
     status: Literal["ONLINE", "STALE"]
     link_status: Literal["LINKED", "RADIO_LOST", "CLOUD_LOST"] = "LINKED"
 

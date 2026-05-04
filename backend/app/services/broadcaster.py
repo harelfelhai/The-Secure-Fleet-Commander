@@ -12,6 +12,7 @@ Lifecycle:
 
 import logging
 from datetime import UTC, datetime
+from typing import Literal
 
 from app.schemas.messages import AgentStatus, AlertMessage, FleetUpdate
 from app.services.connection_manager import FrontendConnectionManager
@@ -33,6 +34,8 @@ class FleetBroadcaster:
         display_name: str,
         frame_data: dict,
         gateway_hardware_id: str | None = None,
+        device_type: Literal["DRONE", "ROVER"] = "DRONE",
+        mission_start_at: datetime | None = None,
     ) -> None:
         """Update in-memory state for one agent. Called after every live telemetry frame."""
         current = self._fleet.get(agent_id)
@@ -42,16 +45,22 @@ class FleetBroadcaster:
         self._fleet[agent_id] = AgentStatus(
             agent_id=agent_id,
             display_name=display_name,
+            device_type=device_type,
             latitude=frame_data["latitude"],
             longitude=frame_data["longitude"],
             altitude_m=frame_data["altitude_m"],
             battery_pct=frame_data["battery_pct"],
             last_seen_at=frame_data["last_seen_at"],
+            mission_start_at=mission_start_at,
             status="ONLINE",
             link_status="LINKED",
         )
         if gateway_hardware_id is not None:
             self._gateway_agents.setdefault(gateway_hardware_id, set()).add(agent_id)
+
+    def get_snapshot(self) -> list[AgentStatus]:
+        """Return the current in-memory fleet state (used by the REST snapshot endpoint)."""
+        return list(self._fleet.values())
 
     def mark_cloud_lost(self, gateway_hardware_id: str) -> None:
         """
@@ -64,11 +73,13 @@ class FleetBroadcaster:
                 self._fleet[agent_id] = AgentStatus(
                     agent_id=current.agent_id,
                     display_name=current.display_name,
+                    device_type=current.device_type,
                     latitude=current.latitude,
                     longitude=current.longitude,
                     altitude_m=current.altitude_m,
                     battery_pct=current.battery_pct,
                     last_seen_at=current.last_seen_at,
+                    mission_start_at=current.mission_start_at,
                     status="STALE",
                     link_status="CLOUD_LOST",
                 )
@@ -88,11 +99,13 @@ class FleetBroadcaster:
         self._fleet[agent_id] = AgentStatus(
             agent_id=current.agent_id,
             display_name=current.display_name,
+            device_type=current.device_type,
             latitude=current.latitude,
             longitude=current.longitude,
             altitude_m=current.altitude_m,
             battery_pct=current.battery_pct,
             last_seen_at=current.last_seen_at,
+            mission_start_at=current.mission_start_at,
             status=new_status,
             link_status=link_status,  # type: ignore[arg-type]
         )

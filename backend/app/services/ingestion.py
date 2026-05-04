@@ -56,6 +56,8 @@ class IngestionContext:
     agent_id: UUID
     display_name: str
     gateway_hardware_id: str | None = None
+    device_type: str = "DRONE"
+    session_started_at: datetime | None = None
     last_persisted_at: datetime | None = field(default=None, compare=False)
 
 
@@ -106,6 +108,8 @@ class IngestionService:
                 "last_seen_at": frame.timestamp,
             },
             gateway_hardware_id=ctx.gateway_hardware_id,
+            device_type=ctx.device_type,  # type: ignore[arg-type]
+            mission_start_at=ctx.session_started_at,
         )
         try:
             await self._broadcaster.broadcast_fleet_update()

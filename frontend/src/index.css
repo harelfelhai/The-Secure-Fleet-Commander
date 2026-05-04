@@ -1,0 +1,127 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+/* ── Layout ─────────────────────────────────────────────────────────────────── */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, sans-serif;
+}
+
+/* ── Map ────────────────────────────────────────────────────────────────────── */
+
+.fleet-map {
+  width: 100%;
+  height: 100%;
+}
+
+/* Keep Leaflet panes below our UI overlays */
+.leaflet-container {
+  z-index: 1;
+}
+
+/* ── Agent marker icons (rendered into Leaflet DivIcon HTML) ─────────────────
+   These classes live outside React's render tree, so Tailwind utilities won't
+   apply to them — we define explicit CSS rules here instead.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.agent-marker-host {
+  background: transparent !important;
+  border: none !important;
+}
+
+.agent-marker {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2.5px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.agent-marker--green  { background-color: #16a34a; color: #fff; }
+.agent-marker--yellow { background-color: #ca8a04; color: #fff; }
+.agent-marker--red    { background-color: #dc2626; color: #fff; }
+.agent-marker--grey   { background-color: #6b7280; color: #fff; opacity: 0.65; }
+
+.agent-marker--selected {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.8), 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.agent-marker__offline-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 13px;
+  height: 13px;
+  background: #dc2626;
+  border-radius: 50%;
+  border: 1.5px solid #fff;
+  font-size: 8px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  line-height: 1;
+}
+
+/* ── Battery bar ─────────────────────────────────────────────────────────────*/
+
+.battery-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.battery-bar__fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.battery-bar__fill--green  { background: #16a34a; }
+.battery-bar__fill--yellow { background: #ca8a04; }
+.battery-bar__fill--red    { background: #dc2626; }
+.battery-bar__fill--grey   { background: #6b7280; }
+
+/* ── Replay controls bar ─────────────────────────────────────────────────────*/
+
+.replay-slider {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: #4b5563;
+  outline: none;
+  cursor: pointer;
+}
+
+.replay-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+}
+
+.replay-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+  border: none;
+}

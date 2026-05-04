@@ -159,6 +159,8 @@ async def gateway_ws(
         agent_id=agent_id,
         display_name=agent_display_name,
         gateway_hardware_id=hardware_id,
+        device_type=agent.device_type,
+        session_started_at=session.started_at,
     )
 
     # ── 3. Register + notify client ───────────────────────────────────────────
