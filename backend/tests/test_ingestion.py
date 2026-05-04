@@ -4,7 +4,7 @@ All external dependencies (DB, rules engine, broadcaster) are replaced with mock
 """
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
