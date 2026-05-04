@@ -34,7 +34,11 @@ class FleetBroadcaster:
         frame_data: dict,
         gateway_hardware_id: str | None = None,
     ) -> None:
-        """Update in-memory state for one agent. Called after every persisted frame."""
+        """Update in-memory state for one agent. Called after every live telemetry frame."""
+        current = self._fleet.get(agent_id)
+        if current is not None and frame_data["last_seen_at"] <= current.last_seen_at:
+            # Stale frame (e.g. arrived out-of-order) — do not overwrite live state
+            return
         self._fleet[agent_id] = AgentStatus(
             agent_id=agent_id,
             display_name=display_name,

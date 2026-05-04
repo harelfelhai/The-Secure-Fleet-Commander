@@ -62,6 +62,13 @@ class IngestionService:
         self._persist_interval = persist_interval_seconds
 
     async def ingest(self, frame: TelemetryFrame, ctx: IngestionContext) -> None:
+        # ── Backfill fast-path ────────────────────────────────────────────────
+        # Frames replayed from the offline buffer skip the rules engine and
+        # broadcaster so stale data never overwrites the live UI state.
+        if frame.is_backfill:
+            await self._ingest_backfill(frame, ctx)
+            return
+
         # ── 1. Evaluate rules (always) ────────────────────────────────────────
         try:
             alerts = self._rules.evaluate(frame)
@@ -119,6 +126,26 @@ class IngestionService:
                 self._persist_interval,
             )
 
+    async def _ingest_backfill(self, frame: TelemetryFrame, ctx: IngestionContext) -> None:
+        """Persist a backfill breadcrumb only — skip rules, alerts, and broadcast."""
+        now = datetime.now(UTC)
+        elapsed = (
+            (now - ctx.last_persisted_at).total_seconds()
+            if ctx.last_persisted_at is not None
+            else float("inf")
+        )
+        if elapsed >= self._persist_interval:
+            await self._persist(frame, ctx)
+            ctx.last_persisted_at = now
+            logger.debug("Backfill breadcrumb persisted for agent %s", ctx.agent_id)
+        else:
+            logger.debug(
+                "Backfill breadcrumb skipped for agent %s (elapsed=%.2fs < %.2fs)",
+                ctx.agent_id,
+                elapsed,
+                self._persist_interval,
+            )
+
     async def _persist(self, frame: TelemetryFrame, ctx: IngestionContext) -> None:
         async with self._db.begin():
             self._db.add(
@@ -132,9 +159,13 @@ class IngestionService:
                     battery_pct=frame.battery_pct,
                 )
             )
-            await self._db.execute(
-                update(Agent).where(Agent.id == ctx.agent_id).values(last_seen_at=frame.timestamp)
-            )
+            if not frame.is_backfill:
+                # Backfill frames are historical — don't roll back last_seen_at
+                await self._db.execute(
+                    update(Agent)
+                    .where(Agent.id == ctx.agent_id)
+                    .values(last_seen_at=frame.timestamp)
+                )
 
     async def _handle_alert(
         self,

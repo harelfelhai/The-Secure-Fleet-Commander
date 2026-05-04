@@ -21,6 +21,7 @@ class TelemetryFrame(BaseModel):
     longitude: Annotated[float, Field(ge=-180, le=180)]
     altitude_m: float
     battery_pct: Annotated[float, Field(ge=0, le=100)]
+    is_backfill: bool = False
 
 
 class FrontendCommand(BaseModel):
