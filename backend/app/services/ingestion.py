@@ -14,6 +14,11 @@ Persistence throttle (step 4):
     c) The rules engine raised at least one alert on this frame
        (alert frames are always persisted as evidence, regardless of interval)
 
+  Throttle uses event time (frame.timestamp) for all elapsed calculations — both
+  live and backfill paths.  Using the server clock for backfill frames would cause
+  the entire buffer replay (which arrives as a rapid burst) to be collapsed to a
+  single breadcrumb because server-side elapsed between frames is near zero.
+
   Agent.last_seen_at is updated in the same transaction as the breadcrumb.
 
 If the breadcrumb write fails, an exception propagates to the caller.
@@ -34,6 +39,15 @@ from app.services.broadcaster import FleetBroadcaster
 from app.services.rules_engine import InternalAlert, RulesEngine
 
 logger = logging.getLogger(__name__)
+
+
+def _event_elapsed(event_time: datetime, last: datetime | None) -> float:
+    """Seconds of drone-time elapsed since the last persisted frame.
+
+    Returns inf when last is None (first frame of a session) so the caller
+    always persists the first frame regardless of the configured interval.
+    """
+    return float("inf") if last is None else (event_time - last).total_seconds()
 
 
 @dataclass
@@ -99,19 +113,19 @@ class IngestionService:
             logger.error("Fleet broadcast failed", exc_info=True)
 
         # ── 4. Conditionally persist breadcrumb ───────────────────────────────
-        now = datetime.now(UTC)
-        elapsed = (
-            (now - ctx.last_persisted_at).total_seconds()
-            if ctx.last_persisted_at is not None
-            else float("inf")
-        )
+        # Use event time (frame.timestamp) so the throttle measures drone time,
+        # not server arrival time.  For live frames the two clocks are within
+        # milliseconds of each other; the semantic is identical.  Keeping a
+        # single clock reference also prevents sign-flip bugs when last_persisted_at
+        # was written by the live path and is then read by the backfill path.
+        elapsed = _event_elapsed(frame.timestamp, ctx.last_persisted_at)
         if elapsed >= self._persist_interval or bool(alerts):
             if ctx.last_persisted_at is None:
                 logger.info("Segment start for agent %s (new session)", ctx.agent_id)
             elif elapsed >= _SILENCE_THRESHOLD:
                 logger.info("Segment boundary for agent %s (silence=%.1fs)", ctx.agent_id, elapsed)
             await self._persist(frame, ctx)
-            ctx.last_persisted_at = now
+            ctx.last_persisted_at = frame.timestamp
             logger.debug(
                 "Persisted breadcrumb for agent %s (elapsed=%.2fs alerts=%d)",
                 ctx.agent_id,
@@ -127,20 +141,27 @@ class IngestionService:
             )
 
     async def _ingest_backfill(self, frame: TelemetryFrame, ctx: IngestionContext) -> None:
-        """Persist a backfill breadcrumb only — skip rules, alerts, and broadcast."""
-        now = datetime.now(UTC)
-        elapsed = (
-            (now - ctx.last_persisted_at).total_seconds()
-            if ctx.last_persisted_at is not None
-            else float("inf")
-        )
+        """
+        Persist a backfill breadcrumb only — skip rules, alerts, and broadcast.
+
+        Throttle is measured in event time (frame.timestamp) so that a buffer
+        replay arriving as a rapid server-side burst still produces one breadcrumb
+        per persist_interval of *original drone time*.  Without this, hundreds of
+        frames delivered within the same server-clock second would collapse to a
+        single row, discarding an hour of position history.
+        """
+        elapsed = _event_elapsed(frame.timestamp, ctx.last_persisted_at)
         if elapsed >= self._persist_interval:
             await self._persist(frame, ctx)
-            ctx.last_persisted_at = now
-            logger.debug("Backfill breadcrumb persisted for agent %s", ctx.agent_id)
+            ctx.last_persisted_at = frame.timestamp
+            logger.debug(
+                "Backfill breadcrumb persisted for agent %s (event_elapsed=%.2fs)",
+                ctx.agent_id,
+                elapsed,
+            )
         else:
             logger.debug(
-                "Backfill breadcrumb skipped for agent %s (elapsed=%.2fs < %.2fs)",
+                "Backfill breadcrumb skipped for agent %s (event_elapsed=%.2fs < %.2fs)",
                 ctx.agent_id,
                 elapsed,
                 self._persist_interval,
