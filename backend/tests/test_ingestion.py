@@ -91,7 +91,7 @@ async def test_post_silence_recovery_frame_persisted():
     """
     svc, db, rules, broadcaster = make_service(persist_interval=2.0)
     ctx = fresh_ctx()
-    ctx.last_persisted_at = datetime.now(UTC) - timedelta(seconds=5.0)  # 5 s silence
+    ctx.last_persisted_at = FRAME.timestamp - timedelta(seconds=5.0)  # 5 s silence in event time
 
     await svc.ingest(FRAME, ctx)
 
@@ -107,7 +107,7 @@ async def test_short_gap_within_interval_not_persisted():
     """
     svc, db, rules, broadcaster = make_service(persist_interval=2.0)
     ctx = fresh_ctx()
-    ctx.last_persisted_at = datetime.now(UTC) - timedelta(seconds=0.5)
+    ctx.last_persisted_at = FRAME.timestamp - timedelta(seconds=0.5)
 
     await svc.ingest(FRAME, ctx)
 
@@ -119,7 +119,7 @@ async def test_short_gap_within_interval_not_persisted():
 async def test_frame_after_interval_is_persisted():
     svc, db, rules, broadcaster = make_service(persist_interval=2.0)
     ctx = fresh_ctx()
-    ctx.last_persisted_at = datetime.now(UTC) - timedelta(seconds=3.0)
+    ctx.last_persisted_at = FRAME.timestamp - timedelta(seconds=3.0)
 
     await svc.ingest(FRAME, ctx)
 
@@ -141,7 +141,7 @@ async def test_alert_frame_persisted_regardless_of_interval():
         ]
     )
     ctx = fresh_ctx()
-    ctx.last_persisted_at = datetime.now(UTC) - timedelta(seconds=0.5)  # within interval
+    ctx.last_persisted_at = FRAME.timestamp - timedelta(seconds=0.5)  # within interval
 
     await svc.ingest(FRAME, ctx)
 
@@ -152,7 +152,7 @@ async def test_alert_frame_persisted_regardless_of_interval():
 async def test_broadcast_always_happens_even_when_not_persisting():
     svc, db, rules, broadcaster = make_service()
     ctx = fresh_ctx()
-    ctx.last_persisted_at = datetime.now(UTC)  # just persisted → no persist this frame
+    ctx.last_persisted_at = FRAME.timestamp  # just persisted → elapsed=0 → no persist this frame
 
     await svc.ingest(FRAME, ctx)
 
