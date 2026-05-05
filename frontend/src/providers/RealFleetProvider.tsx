@@ -1,8 +1,8 @@
-import { useReducer, type ReactNode } from "react";
+import { useEffect, useReducer, type ReactNode } from "react";
 import { FleetContext } from "../context/FleetContext";
 import { fleetReducer, initialState } from "../context/fleet.reducer";
 import { useFleetSocket } from "../hooks/useFleetSocket";
-import type { TrailPoint } from "../types/fleet";
+import type { TrailPoint, ZonePolygon } from "../types/fleet";
 
 interface TrailResponse {
   latitude: number;
@@ -12,10 +12,36 @@ interface TrailResponse {
   recorded_at: string;
 }
 
+interface ZoneApiResponse {
+  zones: Array<{
+    name: string;
+    type: string;
+    coordinates: [number, number][]; // [lon, lat] (Shapely order)
+  }>;
+}
+
 export function RealFleetProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(fleetReducer, initialState);
+  const { sendCommand } = useFleetSocket(dispatch);
 
-  useFleetSocket(dispatch);
+  // Fetch zones once on mount — they're static for the session.
+  useEffect(() => {
+    fetch("/api/v1/zones")
+      .then((r) => r.json() as Promise<ZoneApiResponse>)
+      .then((data) => {
+        const zones: ZonePolygon[] = data.zones
+          .filter((z) => z.type === "POLYGON" && z.coordinates.length >= 3)
+          // Backend stores [lon, lat]; Leaflet wants [lat, lon].
+          .map((z) => ({
+            name: z.name,
+            latlngs: z.coordinates.map(
+              ([lon, lat]) => [lat, lon] as [number, number],
+            ),
+          }));
+        dispatch({ type: "ZONES_LOADED", payload: zones });
+      })
+      .catch((err) => console.warn("Failed to load zones:", err));
+  }, []);
 
   const loadTrail = async (agentId: string): Promise<void> => {
     try {
@@ -36,7 +62,7 @@ export function RealFleetProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <FleetContext.Provider value={{ state, dispatch, loadTrail }}>
+    <FleetContext.Provider value={{ state, dispatch, loadTrail, sendCommand }}>
       {children}
     </FleetContext.Provider>
   );

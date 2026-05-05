@@ -4,6 +4,8 @@ export type LinkStatus = "LINKED" | "RADIO_LOST" | "CLOUD_LOST";
 export type WsStatus = "CONNECTING" | "OPEN" | "CLOSED";
 export type SpeedMultiplier = 1 | 2 | 5 | 10;
 export type AgentColor = "green" | "yellow" | "red" | "grey";
+export type CommandType = "LAND" | "RTH" | "CUT_MOTORS";
+export type CommandStatus = "PENDING" | "SENT" | "FAILED";
 
 export interface AgentState {
   agent_id: string;
@@ -27,6 +29,11 @@ export interface TrailPoint {
   recorded_at: string; // ISO-8601
 }
 
+export interface ZonePolygon {
+  name: string;
+  latlngs: [number, number][]; // [lat, lon] pairs ready for Leaflet
+}
+
 export interface ReceivedAlert {
   id: string; // client-generated for React key + dismiss
   alert_type: "GEOFENCE_VIOLATION" | "LOW_BATTERY";
@@ -34,6 +41,21 @@ export interface ReceivedAlert {
   agent_id: string;
   message: string;
   detected_at: string;
+}
+
+export interface CommandRecord {
+  id: string; // tempId while PENDING, server command_id once SENT
+  agent_id: string;
+  command_type: CommandType;
+  status: CommandStatus;
+  issued_at: string; // ISO-8601
+  error?: string;
+}
+
+export interface Toast {
+  id: string;
+  kind: "success" | "error" | "info";
+  message: string;
 }
 
 export interface ReplayState {
@@ -46,8 +68,11 @@ export interface ReplayState {
 
 export interface AppState {
   agents: Record<string, AgentState>;
+  zones: ZonePolygon[];
   selectedAgentId: string | null;
   replay: ReplayState;
   alerts: ReceivedAlert[];
+  commands: CommandRecord[];
+  toasts: Toast[];
   wsStatus: WsStatus;
 }

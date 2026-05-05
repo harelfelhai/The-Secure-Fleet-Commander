@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { Dispatch } from "react";
-import type { AgentState } from "../types/fleet";
+import type { AgentState, CommandType } from "../types/fleet";
 import type { FleetAction } from "../context/fleet.reducer";
 
 const WS_URL = "/ws/fleet/live";
+const SNAPSHOT_URL = "/api/v1/agents/snapshot";
 const MAX_BACKOFF_MS = 30_000;
 
 interface FleetUpdateMessage {
@@ -20,16 +21,39 @@ interface AlertMessage {
   detected_at: string;
 }
 
-type InboundMessage = FleetUpdateMessage | AlertMessage | { msg_type: string };
+interface CommandSentMessage {
+  msg_type: "COMMAND_SENT";
+  command_id: string;
+  agent_id: string;
+  command_type: CommandType;
+  issued_at: string;
+}
 
-export function useFleetSocket(dispatch: Dispatch<FleetAction>): void {
+interface CommandErrorMessage {
+  msg_type: "COMMAND_ERROR";
+  agent_id: string | null;
+  reason: string;
+}
+
+type InboundMessage =
+  | FleetUpdateMessage
+  | AlertMessage
+  | CommandSentMessage
+  | CommandErrorMessage
+  | { msg_type: string };
+
+export interface FleetSocketHandle {
+  sendCommand: (agentId: string, commandType: CommandType) => string;
+}
+
+export function useFleetSocket(dispatch: Dispatch<FleetAction>): FleetSocketHandle {
   const wsRef = useRef<WebSocket | null>(null);
   const backoffRef = useRef(1_000);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFirstConnect = useRef(true);
 
   const syncFleet = useCallback(() => {
-    fetch("/api/agents/snapshot")
+    fetch(SNAPSHOT_URL)
       .then((r) => r.json())
       .then((agents: AgentState[]) =>
         dispatch({ type: "SYNC_COMPLETE", payload: agents }),
@@ -83,6 +107,40 @@ export function useFleetSocket(dispatch: Dispatch<FleetAction>): void {
             detected_at: alert.detected_at,
           },
         });
+      } else if (msg.msg_type === "COMMAND_SENT") {
+        const cs = msg as CommandSentMessage;
+        dispatch({
+          type: "COMMAND_SENT_RECEIVED",
+          payload: {
+            agent_id: cs.agent_id,
+            command_id: cs.command_id,
+            issued_at: cs.issued_at,
+          },
+        });
+        dispatch({
+          type: "TOAST_PUSH",
+          payload: {
+            id: crypto.randomUUID(),
+            kind: "success",
+            message: `${cs.command_type} dispatched`,
+          },
+        });
+      } else if (msg.msg_type === "COMMAND_ERROR") {
+        const ce = msg as CommandErrorMessage;
+        if (ce.agent_id) {
+          dispatch({
+            type: "COMMAND_ERROR_RECEIVED",
+            payload: { agent_id: ce.agent_id, error: ce.reason },
+          });
+        }
+        dispatch({
+          type: "TOAST_PUSH",
+          payload: {
+            id: crypto.randomUUID(),
+            kind: "error",
+            message: `Command failed: ${ce.reason}`,
+          },
+        });
       }
     };
 
@@ -104,4 +162,44 @@ export function useFleetSocket(dispatch: Dispatch<FleetAction>): void {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, [connect]);
+
+  const sendCommand = useCallback(
+    (agentId: string, commandType: CommandType): string => {
+      const tempId = crypto.randomUUID();
+      dispatch({
+        type: "COMMAND_PENDING",
+        payload: { tempId, agent_id: agentId, command_type: commandType },
+      });
+
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        // No live socket — fail locally and surface the error.
+        dispatch({
+          type: "COMMAND_ERROR_RECEIVED",
+          payload: { agent_id: agentId, error: "not connected" },
+        });
+        dispatch({
+          type: "TOAST_PUSH",
+          payload: {
+            id: crypto.randomUUID(),
+            kind: "error",
+            message: "Command failed: not connected",
+          },
+        });
+        return tempId;
+      }
+
+      ws.send(
+        JSON.stringify({
+          msg_type: "COMMAND",
+          command_type: commandType,
+          agent_id: agentId,
+        }),
+      );
+      return tempId;
+    },
+    [dispatch],
+  );
+
+  return { sendCommand };
 }

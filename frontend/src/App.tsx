@@ -5,6 +5,7 @@ import { AgentSidebar } from "./components/AgentSidebar";
 import { ReplayControls } from "./components/ReplayControls";
 import { AlertToast } from "./components/AlertToast";
 import { ConnectionOverlay } from "./components/ConnectionOverlay";
+import { ToastStack } from "./components/ToastStack";
 import { useFleet } from "./context/FleetContext";
 
 // ── Status bar ─────────────────────────────────────────────────────────────────
@@ -65,6 +66,7 @@ function Layout() {
         {hasSidebar && <AgentSidebar />}
         {hasReplay && <ReplayControls />}
         <AlertToast />
+        <ToastStack />
         <ConnectionOverlay />
       </div>
     </div>

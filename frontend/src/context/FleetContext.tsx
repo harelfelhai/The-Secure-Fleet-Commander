@@ -4,7 +4,7 @@ import {
   type Dispatch,
   type ReactNode,
 } from "react";
-import type { AppState } from "../types/fleet";
+import type { AppState, CommandType } from "../types/fleet";
 import type { FleetAction } from "./fleet.reducer";
 
 // ── Context value shape ────────────────────────────────────────────────────────
@@ -14,6 +14,8 @@ export interface FleetContextValue {
   dispatch: Dispatch<FleetAction>;
   /** Load trail frames for an agent, then dispatch REPLAY_LOADED. */
   loadTrail: (agentId: string) => Promise<void>;
+  /** Issue an emergency command. Returns the client tempId. */
+  sendCommand: (agentId: string, commandType: CommandType) => string;
 }
 
 // ── Context object ─────────────────────────────────────────────────────────────

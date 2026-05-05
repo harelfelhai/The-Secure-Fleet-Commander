@@ -1,6 +1,7 @@
 import { useFleet } from "../context/FleetContext";
 import type { AgentState } from "../types/fleet";
 import { getAgentColor } from "../utils/agentStyle";
+import { EmergencyCommands } from "./EmergencyCommands";
 
 function formatRelativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -74,7 +75,6 @@ export function AgentSidebar() {
 
   if (!agent) return null;
 
-  const color = getAgentColor(agent);
   const linkVariant =
     agent.link_status === "LINKED"
       ? "green"
@@ -93,13 +93,34 @@ export function AgentSidebar() {
           <h2 className="font-bold text-white">{agent.display_name}</h2>
           <p className="text-xs text-gray-400">{agent.device_type}</p>
         </div>
-        <button
-          onClick={() => dispatch({ type: "DESELECT_AGENT" })}
-          className="rounded-lg p-1 text-gray-400 hover:bg-gray-700 hover:text-white"
-          aria-label="Close sidebar"
-        >
-          ✕
-        </button>
+        <div className="flex items-center gap-1">
+          {isReplayingThis ? (
+            <button
+              onClick={() => dispatch({ type: "REPLAY_CLOSE" })}
+              className="rounded-lg p-1.5 text-xs text-gray-300 hover:bg-gray-700 hover:text-white"
+              aria-label="Stop replay"
+              title="Stop replay"
+            >
+              ◼
+            </button>
+          ) : (
+            <button
+              onClick={() => void loadTrail(agent.agent_id)}
+              className="rounded-lg p-1.5 text-xs text-gray-300 hover:bg-gray-700 hover:text-white"
+              aria-label="Replay mission"
+              title="Replay mission"
+            >
+              ▶
+            </button>
+          )}
+          <button
+            onClick={() => dispatch({ type: "DESELECT_AGENT" })}
+            className="rounded-lg p-1 text-gray-400 hover:bg-gray-700 hover:text-white"
+            aria-label="Close sidebar"
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       {/* Body */}
@@ -156,27 +177,9 @@ export function AgentSidebar() {
         </div>
       </div>
 
-      {/* Footer — replay controls */}
+      {/* Footer — emergency commands */}
       <div className="border-t border-gray-700 px-4 py-3">
-        {isReplayingThis ? (
-          <button
-            onClick={() => dispatch({ type: "REPLAY_CLOSE" })}
-            className="w-full rounded-lg bg-gray-700 py-2 text-sm font-medium text-white hover:bg-gray-600"
-          >
-            Stop Replay
-          </button>
-        ) : (
-          <button
-            onClick={() => void loadTrail(agent.agent_id)}
-            className={`w-full rounded-lg py-2 text-sm font-medium text-white ${
-              color === "grey"
-                ? "bg-gray-600 hover:bg-gray-500"
-                : "bg-blue-600 hover:bg-blue-500"
-            }`}
-          >
-            ▶ Replay Mission
-          </button>
-        )}
+        <EmergencyCommands agent={agent} />
       </div>
     </div>
   );

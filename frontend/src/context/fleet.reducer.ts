@@ -1,10 +1,14 @@
 import type {
   AgentState,
   AppState,
+  CommandRecord,
+  CommandType,
   ReceivedAlert,
   SpeedMultiplier,
+  Toast,
   TrailPoint,
   WsStatus,
+  ZonePolygon,
 } from "../types/fleet";
 
 // ── Actions ────────────────────────────────────────────────────────────────────
@@ -15,6 +19,8 @@ export type FleetAction =
   | { type: "SYNC_COMPLETE"; payload: AgentState[] } // REST snapshot on reconnect
   | { type: "ALERT_RECEIVED"; payload: ReceivedAlert }
   | { type: "ALERT_DISMISS"; payload: string } // alert id
+  // Zones
+  | { type: "ZONES_LOADED"; payload: ZonePolygon[] }
   // Agent selection
   | { type: "SELECT_AGENT"; payload: string } // agent_id
   | { type: "DESELECT_AGENT" }
@@ -26,6 +32,19 @@ export type FleetAction =
   | { type: "REPLAY_PAUSE" }
   | { type: "REPLAY_SET_SPEED"; payload: SpeedMultiplier }
   | { type: "REPLAY_CLOSE" }
+  // Commands
+  | {
+      type: "COMMAND_PENDING";
+      payload: { tempId: string; agent_id: string; command_type: CommandType };
+    }
+  | {
+      type: "COMMAND_SENT_RECEIVED";
+      payload: { agent_id: string; command_id: string; issued_at: string };
+    }
+  | { type: "COMMAND_ERROR_RECEIVED"; payload: { agent_id: string; error: string } }
+  // Toasts (transient operator feedback)
+  | { type: "TOAST_PUSH"; payload: Toast }
+  | { type: "TOAST_DISMISS"; payload: string } // toast id
   // Connection
   | { type: "WS_STATUS"; payload: WsStatus };
 
@@ -33,6 +52,7 @@ export type FleetAction =
 
 export const initialState: AppState = {
   agents: {},
+  zones: [],
   selectedAgentId: null,
   replay: {
     agentId: null,
@@ -42,8 +62,26 @@ export const initialState: AppState = {
     speedMultiplier: 1,
   },
   alerts: [],
+  commands: [],
+  toasts: [],
   wsStatus: "CONNECTING",
 };
+
+// UI disables action buttons while a PENDING exists, so in practice there's
+// at most one PENDING per agent. We still pick the oldest defensively.
+function updateOldestPending(
+  commands: CommandRecord[],
+  agent_id: string,
+  patch: Partial<CommandRecord>,
+): CommandRecord[] {
+  const idx = commands.findIndex(
+    (c) => c.agent_id === agent_id && c.status === "PENDING",
+  );
+  if (idx < 0) return commands;
+  const next = commands.slice();
+  next[idx] = { ...next[idx], ...patch };
+  return next;
+}
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
 
@@ -57,6 +95,9 @@ export function fleetReducer(state: AppState, action: FleetAction): AppState {
       }
       return { ...state, agents };
     }
+
+    case "ZONES_LOADED":
+      return { ...state, zones: action.payload };
 
     case "ALERT_RECEIVED":
       return {
@@ -135,6 +176,51 @@ export function fleetReducer(state: AppState, action: FleetAction): AppState {
       return {
         ...state,
         replay: { ...initialState.replay },
+      };
+
+    case "COMMAND_PENDING": {
+      const record: CommandRecord = {
+        id: action.payload.tempId,
+        agent_id: action.payload.agent_id,
+        command_type: action.payload.command_type,
+        status: "PENDING",
+        issued_at: new Date().toISOString(),
+      };
+      return {
+        ...state,
+        commands: [record, ...state.commands].slice(0, 50),
+      };
+    }
+
+    case "COMMAND_SENT_RECEIVED":
+      return {
+        ...state,
+        commands: updateOldestPending(state.commands, action.payload.agent_id, {
+          id: action.payload.command_id,
+          status: "SENT",
+          issued_at: action.payload.issued_at,
+        }),
+      };
+
+    case "COMMAND_ERROR_RECEIVED":
+      return {
+        ...state,
+        commands: updateOldestPending(state.commands, action.payload.agent_id, {
+          status: "FAILED",
+          error: action.payload.error,
+        }),
+      };
+
+    case "TOAST_PUSH":
+      return {
+        ...state,
+        toasts: [...state.toasts, action.payload].slice(-5),
+      };
+
+    case "TOAST_DISMISS":
+      return {
+        ...state,
+        toasts: state.toasts.filter((t) => t.id !== action.payload),
       };
 
     case "WS_STATUS":

@@ -1,6 +1,7 @@
 import { MapContainer, Polyline, TileLayer } from "react-leaflet";
 import { useFleet } from "../context/FleetContext";
 import { AgentMarker } from "./AgentMarker";
+import { NoFlyZones } from "./NoFlyZones";
 
 const DEFAULT_CENTER: [number, number] = [32.0853, 34.7818];
 const DEFAULT_ZOOM = 14;
@@ -29,6 +30,8 @@ export function FleetMap() {
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+
+      <NoFlyZones />
 
       {agents.map((agent) => (
         <AgentMarker key={agent.agent_id} agent={agent} />
