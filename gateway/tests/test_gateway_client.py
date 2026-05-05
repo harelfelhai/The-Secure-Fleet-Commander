@@ -17,7 +17,6 @@ from app.config import SimulatorSettings
 from app.gateway_client import GatewayClient
 from app.schemas import CommandDispatch, TelemetryFrame
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 

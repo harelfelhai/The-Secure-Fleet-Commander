@@ -48,7 +48,7 @@ pgAdmin UI is at [http://localhost:5050](http://localhost:5050) (admin@fleet.loc
 cd backend
 cp .env.example .env          # adjust if needed
 pip install -e ".[dev]"
-alembic upgrade head           # creates all 5 tables
+alembic upgrade head           # creates all tables
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -62,20 +62,29 @@ cd backend
 pytest -v
 ```
 
-### 4. Start the gateway simulator *(Milestone 3)*
+### 4. Start the gateway simulator
 
 ```bash
 cd gateway
 pip install -e ".[dev]"
-python -m app.main --mode simulate
+python -m app.main
 ```
 
-### 5. Start the frontend *(Milestone 4)*
+The gateway connects to the backend, registers as `sim-drone-001`, and begins streaming telemetry at 5 Hz.
+
+### 5. Start the frontend
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev          # http://localhost:5173
+```
+
+To run without a backend (mock mode):
+
+```bash
+VITE_USE_MOCK=true npm run dev
+# or open: http://localhost:5173?mock=true
 ```
 
 ---
@@ -97,8 +106,8 @@ npm run dev          # http://localhost:5173
 | Milestone | Status | Description |
 |---|---|---|
 | 0 — Foundation | ✅ Done | Repo structure, DB, backend skeleton, CI |
-| 1 — Backend Ingest | 🔲 Next | WebSocket ingest, persistence, zone evaluator |
-| 2 — Command Flow | 🔲 Pending | GO_TO_WAYPOINT pipeline, ACK handling |
-| 3 — Gateway Simulator | 🔲 Pending | Simulated drone adapter, offline buffer |
-| 4 — Frontend MVP | 🔲 Pending | Live map, heartbeat, click-to-command |
+| 1 — Backend Ingest | ✅ Done | WebSocket ingest, persistence, zone evaluator, rules engine |
+| 2 — Command Flow | ✅ Done | LAND / RTH / CUT_MOTORS pipeline, ACK handling |
+| 3 — Gateway Simulator | ✅ Done | Simulated drone adapter, offline buffer, reconnect backoff |
+| 4 — Frontend MVP | ✅ Done | Live map, agent markers, emergency controls, replay, no-fly zones |
 | 5 — Hardening | 🔲 Pending | mTLS, rate limiting, structured logging |

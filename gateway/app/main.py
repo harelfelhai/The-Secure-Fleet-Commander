@@ -34,7 +34,9 @@ async def main() -> None:
     )
     await adapter.connect()
 
-    async with OfflineBuffer(cfg.offline_buffer_path, cfg.offline_buffer_max_size) as buf:
+    async with OfflineBuffer(
+        cfg.offline_buffer_path, cfg.offline_buffer_max_size
+    ) as buf:
         client = GatewayClient(cfg, adapter, buf)
         try:
             await client.run()

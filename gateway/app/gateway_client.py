@@ -2,7 +2,7 @@
 GatewayClient — connects the SimulatedDroneAdapter to the Fleet Commander backend.
 
 Lifecycle per connection attempt:
-  1. Acquire JWT via POST /gateways/auth
+  1. Acquire JWT via POST /api/v1/auth/gateway-token
   2. Open WebSocket → validate READY handshake
   3. Run three concurrent tasks under asyncio.TaskGroup:
        A. Live producer  — reads adapter telemetry → ws.send()
@@ -66,7 +66,9 @@ class GatewayClient:
                 raise
             except Exception as exc:
                 logger.warning(
-                    "Connection failed (%s), retrying in %.1fs", type(exc).__name__, backoff
+                    "Connection failed (%s), retrying in %.1fs",
+                    type(exc).__name__,
+                    backoff,
                 )
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, self._config.reconnect_backoff_max_seconds)
@@ -74,9 +76,11 @@ class GatewayClient:
     # ── Authentication ─────────────────────────────────────────────────────────
 
     async def _authenticate(self) -> str:
-        url = f"{self._config.backend_api_url}/gateways/auth"
+        url = f"{self._config.backend_api_url}/api/v1/auth/gateway-token"
         async with httpx.AsyncClient() as client:
-            resp = await client.post(url, json={"hardware_id": self._config.hardware_id})
+            resp = await client.post(
+                url, params={"hardware_id": self._config.hardware_id}
+            )
             resp.raise_for_status()
             return resp.json()["token"]
 
@@ -85,13 +89,13 @@ class GatewayClient:
     async def _run_session(self, token: str) -> None:
         ws_url = (
             f"{self._config.backend_ws_url}/ws/gateway/{self._config.hardware_id}"
+            f"?token={token}"
         )
-        async with websockets.connect(
-            ws_url,
-            additional_headers={"Authorization": f"Bearer {token}"},
-        ) as ws:
+        async with websockets.connect(ws_url) as ws:
             await self._handshake(ws)
-            logger.info("Gateway session open for hardware_id=%s", self._config.hardware_id)
+            logger.info(
+                "Gateway session open for hardware_id=%s", self._config.hardware_id
+            )
 
             try:
                 async with asyncio.TaskGroup() as tg:
@@ -114,7 +118,11 @@ class GatewayClient:
         if msg.get("msg_type") != "READY":
             raise ConnectionError(f"Expected READY, got: {msg.get('msg_type')}")
         ready = ReadyMessage.model_validate(msg)
-        logger.info("READY received: agent_id=%s session_id=%s", ready.agent_id, ready.session_id)
+        logger.info(
+            "READY received: agent_id=%s session_id=%s",
+            ready.agent_id,
+            ready.session_id,
+        )
 
     # ── Task A: Live telemetry producer ───────────────────────────────────────
 

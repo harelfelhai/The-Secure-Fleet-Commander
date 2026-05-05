@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useFleet } from "../context/FleetContext";
 import type { AgentState } from "../types/fleet";
 import { getAgentColor } from "../utils/agentStyle";
@@ -62,6 +63,51 @@ function StatusPill({
       <span className={`rounded px-2 py-0.5 text-xs font-medium ${colours[variant]}`}>
         {value}
       </span>
+    </div>
+  );
+}
+
+interface ViolationRecord {
+  id: string;
+  zone_name: string;
+  detected_at: string;
+}
+
+function ViolationHistory({ agentId }: { agentId: string }) {
+  const [violations, setViolations] = useState<ViolationRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/v1/violations?agent_id=${agentId}&limit=10`)
+      .then((r) => r.json())
+      .then((data: ViolationRecord[]) => setViolations(data))
+      .catch(() => setViolations([]))
+      .finally(() => setLoading(false));
+  }, [agentId]);
+
+  return (
+    <div className="space-y-1">
+      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+        Zone Violations
+      </p>
+      {loading ? (
+        <p className="text-xs text-gray-500">Loading…</p>
+      ) : violations.length === 0 ? (
+        <p className="text-xs text-gray-500">No violations recorded.</p>
+      ) : (
+        <ul className="space-y-1">
+          {violations.map((v) => (
+            <li
+              key={v.id}
+              className="rounded-lg bg-red-950/50 px-3 py-2 text-xs text-red-200"
+            >
+              <div className="font-medium">{v.zone_name}</div>
+              <div className="text-red-400">{formatRelativeTime(v.detected_at)}</div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -175,6 +221,9 @@ export function AgentSidebar() {
             </div>
           </div>
         </div>
+
+        {/* Violation history */}
+        <ViolationHistory agentId={agent.agent_id} />
       </div>
 
       {/* Footer — emergency commands */}
