@@ -50,10 +50,13 @@ export type FleetAction =
 
 // ── Initial state ─────────────────────────────────────────────────────────────
 
+const BATTERY_HISTORY_MAX = 60;
+
 export const initialState: AppState = {
   agents: {},
   zones: [],
   selectedAgentId: null,
+  batteryHistory: {},
   replay: {
     agentId: null,
     frames: [],
@@ -90,10 +93,15 @@ export function fleetReducer(state: AppState, action: FleetAction): AppState {
     case "FLEET_UPDATE":
     case "SYNC_COMPLETE": {
       const agents: Record<string, AgentState> = {};
+      const batteryHistory = { ...state.batteryHistory };
       for (const a of action.payload) {
         agents[a.agent_id] = a;
+        const prev = batteryHistory[a.agent_id] ?? [];
+        batteryHistory[a.agent_id] = [...prev, a.battery_pct].slice(
+          -BATTERY_HISTORY_MAX,
+        );
       }
-      return { ...state, agents };
+      return { ...state, agents, batteryHistory };
     }
 
     case "ZONES_LOADED":

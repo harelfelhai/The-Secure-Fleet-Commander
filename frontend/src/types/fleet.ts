@@ -75,4 +75,5 @@ export interface AppState {
   commands: CommandRecord[];
   toasts: Toast[];
   wsStatus: WsStatus;
+  batteryHistory: Record<string, number[]>; // agent_id → last 60 readings
 }

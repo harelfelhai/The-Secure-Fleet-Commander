@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useFleet } from "../context/FleetContext";
 import type { AgentState } from "../types/fleet";
 import { getAgentColor } from "../utils/agentStyle";
+import { BatterySpark } from "./BatterySpark";
 import { EmergencyCommands } from "./EmergencyCommands";
 
 function formatRelativeTime(iso: string): string {
@@ -67,6 +68,8 @@ function StatusPill({
   );
 }
 
+// ── Violation history ─────────────────────────────────────────────────────────
+
 interface ViolationRecord {
   id: string;
   zone_name: string;
@@ -112,6 +115,73 @@ function ViolationHistory({ agentId }: { agentId: string }) {
   );
 }
 
+// ── Command history ───────────────────────────────────────────────────────────
+
+interface CommandRecord {
+  id: string;
+  command_type: string;
+  status: string;
+  issued_at: string;
+  acked_at: string | null;
+}
+
+const CMD_STATUS_STYLE: Record<string, string> = {
+  ACKNOWLEDGED: "bg-green-900/50 text-green-300",
+  SENT: "bg-yellow-900/50 text-yellow-300",
+  FAILED: "bg-red-900/50 text-red-300",
+  REJECTED: "bg-red-900/50 text-red-300",
+};
+
+function CommandHistory({ agentId }: { agentId: string }) {
+  const [commands, setCommands] = useState<CommandRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/v1/agents/${agentId}/commands?limit=10`)
+      .then((r) => r.json())
+      .then((data: CommandRecord[]) => setCommands(data))
+      .catch(() => setCommands([]))
+      .finally(() => setLoading(false));
+  }, [agentId]);
+
+  return (
+    <div className="space-y-1">
+      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+        Command History
+      </p>
+      {loading ? (
+        <p className="text-xs text-gray-500">Loading…</p>
+      ) : commands.length === 0 ? (
+        <p className="text-xs text-gray-500">No commands issued.</p>
+      ) : (
+        <ul className="space-y-1">
+          {commands.map((c) => (
+            <li
+              key={c.id}
+              className="flex items-center justify-between rounded-lg bg-gray-800 px-3 py-2 text-xs"
+            >
+              <span className="font-medium text-gray-200">
+                {c.command_type.replace("_", " ")}
+              </span>
+              <div className="flex flex-col items-end gap-0.5">
+                <span
+                  className={`rounded px-1.5 py-0.5 text-xs font-medium ${CMD_STATUS_STYLE[c.status] ?? "bg-gray-700 text-gray-300"}`}
+                >
+                  {c.status}
+                </span>
+                <span className="text-gray-500">{formatRelativeTime(c.issued_at)}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
+
 export function AgentSidebar() {
   const { state, dispatch, loadTrail } = useFleet();
 
@@ -120,6 +190,9 @@ export function AgentSidebar() {
     : null;
 
   if (!agent) return null;
+
+  const color = getAgentColor(agent);
+  const sparkValues = state.batteryHistory[agent.agent_id] ?? [];
 
   const linkVariant =
     agent.link_status === "LINKED"
@@ -177,8 +250,13 @@ export function AgentSidebar() {
           <StatusPill label="Link" value={agent.link_status} variant={linkVariant} />
         </div>
 
-        {/* Battery */}
-        <BatteryBar agent={agent} />
+        {/* Battery bar + sparkline */}
+        <div className="space-y-1">
+          <BatteryBar agent={agent} />
+          {sparkValues.length >= 2 && (
+            <BatterySpark values={sparkValues} color={color} />
+          )}
+        </div>
 
         {/* Position */}
         <div className="space-y-1">
@@ -224,6 +302,9 @@ export function AgentSidebar() {
 
         {/* Violation history */}
         <ViolationHistory agentId={agent.agent_id} />
+
+        {/* Command history */}
+        <CommandHistory agentId={agent.agent_id} />
       </div>
 
       {/* Footer — emergency commands */}

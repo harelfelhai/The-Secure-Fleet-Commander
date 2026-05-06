@@ -38,3 +38,13 @@ class SessionResponse(BaseModel):
     agent_id: uuid.UUID
     started_at: datetime
     ended_at: datetime | None
+
+
+class CommandLogResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    command_type: str
+    status: str
+    issued_at: datetime
+    acked_at: datetime | None

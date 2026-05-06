@@ -1,6 +1,7 @@
 import { MapContainer, Polyline, TileLayer } from "react-leaflet";
 import { useFleet } from "../context/FleetContext";
 import { AgentMarker } from "./AgentMarker";
+import { MapFitControl } from "./MapFitControl";
 import { NoFlyZones } from "./NoFlyZones";
 
 const DEFAULT_CENTER: [number, number] = [32.0853, 34.7818];
@@ -32,6 +33,7 @@ export function FleetMap() {
       />
 
       <NoFlyZones />
+      <MapFitControl />
 
       {agents.map((agent) => (
         <AgentMarker key={agent.agent_id} agent={agent} />

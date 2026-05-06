@@ -8,8 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_broadcaster
-from app.models import Agent, FlightSession, GpsBreadcrumb
-from app.schemas.agents import AgentListResponse, AgentResponse, BreadcrumbResponse, SessionResponse
+from app.models import Agent, CommandLog, FlightSession, GpsBreadcrumb
+from app.schemas.agents import (
+    AgentListResponse,
+    AgentResponse,
+    BreadcrumbResponse,
+    CommandLogResponse,
+    SessionResponse,
+)
 from app.schemas.messages import AgentStatus
 from app.services.broadcaster import FleetBroadcaster
 
@@ -104,6 +110,25 @@ async def get_agent_breadcrumbs(agent_id: uuid.UUID, db: DbSession) -> list[Brea
         .order_by(GpsBreadcrumb.recorded_at.asc())
     )
     return [BreadcrumbResponse.model_validate(b) for b in result.scalars().all()]
+
+
+@router.get("/{agent_id}/commands", response_model=list[CommandLogResponse])
+async def get_agent_commands(
+    agent_id: uuid.UUID,
+    db: DbSession,
+    limit: int = Query(default=20, le=100),
+) -> list[CommandLogResponse]:
+    agent = await db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    result = await db.execute(
+        select(CommandLog)
+        .where(CommandLog.agent_id == agent_id)
+        .order_by(CommandLog.issued_at.desc())
+        .limit(limit)
+    )
+    return [CommandLogResponse.model_validate(c) for c in result.scalars().all()]
 
 
 @router.get("/{agent_id}/sessions", response_model=list[SessionResponse])
