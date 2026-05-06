@@ -221,13 +221,14 @@ async def gateway_ws(
                         logger.warning("Telemetry validation failed from %s: %s", hardware_id, exc)
                         continue  # drop single bad frame; keep connection open
 
-                    # Anti-spoofing: agent_id in frame must match the authenticated agent
-                    if frame.agent_id != str(agent_id):
+                    # Anti-spoofing: agent_id in frame must match the authenticated hardware_id.
+                    # The gateway sets agent_id to its hardware_id string, not the DB UUID.
+                    if frame.agent_id != hardware_id:
                         logger.error(
                             "agent_id mismatch from %s: got %s expected %s",
                             hardware_id,
                             frame.agent_id,
-                            agent_id,
+                            hardware_id,
                         )
                         await websocket.close(code=4003, reason="agent_id mismatch")
                         return
