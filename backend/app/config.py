@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     persist_interval_seconds: float = 2.0
 
     debug: bool = False
+    # Allow the dev-only /api/v1/auth/gateway-token endpoint.
+    # Defaults to True so the dev workflow works out of the box.
+    # Explicitly set ALLOW_GATEWAY_TOKEN_ENDPOINT=false in production.
+    allow_gateway_token_endpoint: bool = True
 
 
 settings = Settings()
