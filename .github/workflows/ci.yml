@@ -63,7 +63,7 @@ jobs:
         run: pytest -v --tb=short
 
   frontend-lint:
-    name: Frontend — Lint & Type Check
+    name: Frontend — Lint, Type Check & Test
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -81,3 +81,5 @@ jobs:
         run: npm run typecheck
       - name: Lint
         run: npm run lint
+      - name: Test
+        run: npm test
