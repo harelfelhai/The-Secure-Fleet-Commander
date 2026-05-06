@@ -300,6 +300,7 @@ async def fleet_ws(
     websocket: WebSocket,
     broadcaster: FleetBroadcaster = Depends(get_broadcaster),
 ) -> None:
+    await websocket.accept()
     await frontend_manager.connect(websocket)
 
     # Send current fleet snapshot immediately so the frontend doesn't wait

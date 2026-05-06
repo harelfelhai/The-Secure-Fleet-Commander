@@ -21,7 +21,8 @@ class GatewayConnectionManager:
         self._connections: dict[str, WebSocket] = {}
 
     async def connect(self, hardware_id: str, websocket: WebSocket) -> None:
-        await websocket.accept()
+        # Caller is responsible for websocket.accept() — typically done up front
+        # by the route handler so auth can run before registration.
         self._connections[hardware_id] = websocket
         logger.info("Gateway connected: %s", hardware_id)
 
@@ -52,7 +53,7 @@ class FrontendConnectionManager:
         self._clients: list[WebSocket] = []
 
     async def connect(self, websocket: WebSocket) -> None:
-        await websocket.accept()
+        # Caller is responsible for websocket.accept().
         self._clients.append(websocket)
         logger.info("Frontend client connected (total: %d)", len(self._clients))
 
