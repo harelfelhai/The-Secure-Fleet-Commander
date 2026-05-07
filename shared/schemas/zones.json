@@ -1,0 +1,26 @@
+{
+  "zones": [
+    {
+      "name": "Restricted Airspace Alpha",
+      "type": "POLYGON",
+      "coordinates": [
+        [34.77, 32.08],
+        [34.79, 32.08],
+        [34.79, 32.10],
+        [34.77, 32.10],
+        [34.77, 32.08]
+      ]
+    },
+    {
+      "name": "Airport Exclusion Zone",
+      "type": "POLYGON",
+      "coordinates": [
+        [34.88, 32.00],
+        [34.92, 32.00],
+        [34.92, 32.02],
+        [34.88, 32.02],
+        [34.88, 32.00]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+# Full-stack deployment: PostgreSQL + backend + frontend (nginx).
+# For dev infra only (PostgreSQL + pgAdmin), use infra/docker-compose.yml instead.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: fleet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fleet}
+      POSTGRES_DB: fleet_commander
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fleet -d fleet_commander"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://fleet:${POSTGRES_PASSWORD:-fleet}@postgres:5432/fleet_commander
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      ZONES_CONFIG_PATH: /app/zones.json
+      DEBUG: ${DEBUG:-false}
+    volumes:
+      - ./shared/schemas/zones.json:/app/zones.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status == 200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
