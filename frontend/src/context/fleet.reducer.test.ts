@@ -233,4 +233,75 @@ describe("fleetReducer", () => {
     state = fleetReducer(state, { type: "TOAST_DISMISS", payload: "unknown" });
     expect(state.toasts).toHaveLength(1);
   });
+
+  // ── Plan mode ─────────────────────────────────────────────────────────────
+
+  it("PLAN_MODE_TOGGLE turns plan mode on", () => {
+    const state = fleetReducer(initialState, { type: "PLAN_MODE_TOGGLE" });
+    expect(state.planMode).toBe(true);
+  });
+
+  it("PLAN_MODE_TOGGLE turns plan mode off", () => {
+    let state = fleetReducer(initialState, { type: "PLAN_MODE_TOGGLE" });
+    state = fleetReducer(state, { type: "PLAN_MODE_TOGGLE" });
+    expect(state.planMode).toBe(false);
+  });
+
+  it("WAYPOINT_ADD appends a waypoint", () => {
+    const state = fleetReducer(initialState, {
+      type: "WAYPOINT_ADD",
+      payload: { id: "wp-1", lat: 32.0, lng: 34.7 },
+    });
+    expect(state.waypoints).toHaveLength(1);
+    expect(state.waypoints[0]).toEqual({ id: "wp-1", lat: 32.0, lng: 34.7 });
+  });
+
+  it("WAYPOINT_ADD appends in order", () => {
+    let state = fleetReducer(initialState, {
+      type: "WAYPOINT_ADD",
+      payload: { id: "wp-1", lat: 32.0, lng: 34.7 },
+    });
+    state = fleetReducer(state, {
+      type: "WAYPOINT_ADD",
+      payload: { id: "wp-2", lat: 32.1, lng: 34.8 },
+    });
+    expect(state.waypoints).toHaveLength(2);
+    expect(state.waypoints[1].id).toBe("wp-2");
+  });
+
+  it("WAYPOINT_REMOVE removes by id", () => {
+    let state = fleetReducer(initialState, {
+      type: "WAYPOINT_ADD",
+      payload: { id: "wp-1", lat: 32.0, lng: 34.7 },
+    });
+    state = fleetReducer(state, {
+      type: "WAYPOINT_ADD",
+      payload: { id: "wp-2", lat: 32.1, lng: 34.8 },
+    });
+    state = fleetReducer(state, { type: "WAYPOINT_REMOVE", payload: "wp-1" });
+    expect(state.waypoints).toHaveLength(1);
+    expect(state.waypoints[0].id).toBe("wp-2");
+  });
+
+  it("WAYPOINT_REMOVE ignores unknown id", () => {
+    let state = fleetReducer(initialState, {
+      type: "WAYPOINT_ADD",
+      payload: { id: "wp-1", lat: 32.0, lng: 34.7 },
+    });
+    state = fleetReducer(state, { type: "WAYPOINT_REMOVE", payload: "no-such-id" });
+    expect(state.waypoints).toHaveLength(1);
+  });
+
+  it("WAYPOINTS_CLEAR removes all waypoints", () => {
+    let state = fleetReducer(initialState, {
+      type: "WAYPOINT_ADD",
+      payload: { id: "wp-1", lat: 32.0, lng: 34.7 },
+    });
+    state = fleetReducer(state, {
+      type: "WAYPOINT_ADD",
+      payload: { id: "wp-2", lat: 32.1, lng: 34.8 },
+    });
+    state = fleetReducer(state, { type: "WAYPOINTS_CLEAR" });
+    expect(state.waypoints).toHaveLength(0);
+  });
 });

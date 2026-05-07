@@ -6,12 +6,13 @@ import { ReplayControls } from "./components/ReplayControls";
 import { AlertToast } from "./components/AlertToast";
 import { ConnectionOverlay } from "./components/ConnectionOverlay";
 import { ToastStack } from "./components/ToastStack";
+import { WaypointPanel } from "./components/WaypointPanel";
 import { useFleet } from "./context/FleetContext";
 
 // ── Status bar ─────────────────────────────────────────────────────────────────
 
 function StatusBar() {
-  const { state } = useFleet();
+  const { state, dispatch } = useFleet();
   const agentCount = Object.keys(state.agents).length;
   const wsColour =
     state.wsStatus === "OPEN"
@@ -35,6 +36,17 @@ function StatusBar() {
         <span>
           {agentCount} agent{agentCount !== 1 ? "s" : ""}
         </span>
+        <button
+          onClick={() => dispatch({ type: "PLAN_MODE_TOGGLE" })}
+          className={`rounded px-2 py-0.5 font-semibold transition-colors ${
+            state.planMode
+              ? "bg-blue-600 text-white hover:bg-blue-700"
+              : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+          }`}
+          title={state.planMode ? "Exit Plan Mode" : "Enter Plan Mode"}
+        >
+          {state.planMode ? "✎ Planning" : "✎ Plan"}
+        </button>
         <span className={wsColour}>● {wsLabel}</span>
       </div>
     </header>
@@ -63,8 +75,9 @@ function Layout() {
           <FleetMap />
         </div>
 
-        {hasSidebar && <AgentSidebar />}
-        {hasReplay && <ReplayControls />}
+        {hasSidebar && !state.planMode && <AgentSidebar />}
+        {hasReplay && !state.planMode && <ReplayControls />}
+        {state.planMode && <WaypointPanel />}
         <AlertToast />
         <ToastStack />
         <ConnectionOverlay />

@@ -3,6 +3,7 @@ import type {
   AppState,
   CommandRecord,
   CommandType,
+  PlanWaypoint,
   ReceivedAlert,
   SpeedMultiplier,
   Toast,
@@ -46,7 +47,12 @@ export type FleetAction =
   | { type: "TOAST_PUSH"; payload: Toast }
   | { type: "TOAST_DISMISS"; payload: string } // toast id
   // Connection
-  | { type: "WS_STATUS"; payload: WsStatus };
+  | { type: "WS_STATUS"; payload: WsStatus }
+  // Plan mode
+  | { type: "PLAN_MODE_TOGGLE" }
+  | { type: "WAYPOINT_ADD"; payload: PlanWaypoint }
+  | { type: "WAYPOINT_REMOVE"; payload: string } // waypoint id
+  | { type: "WAYPOINTS_CLEAR" };
 
 // ── Initial state ─────────────────────────────────────────────────────────────
 
@@ -68,6 +74,8 @@ export const initialState: AppState = {
   commands: [],
   toasts: [],
   wsStatus: "CONNECTING",
+  planMode: false,
+  waypoints: [],
 };
 
 // UI disables action buttons while a PENDING exists, so in practice there's
@@ -233,6 +241,21 @@ export function fleetReducer(state: AppState, action: FleetAction): AppState {
 
     case "WS_STATUS":
       return { ...state, wsStatus: action.payload };
+
+    case "PLAN_MODE_TOGGLE":
+      return { ...state, planMode: !state.planMode };
+
+    case "WAYPOINT_ADD":
+      return { ...state, waypoints: [...state.waypoints, action.payload] };
+
+    case "WAYPOINT_REMOVE":
+      return {
+        ...state,
+        waypoints: state.waypoints.filter((w) => w.id !== action.payload),
+      };
+
+    case "WAYPOINTS_CLEAR":
+      return { ...state, waypoints: [] };
 
     default:
       return state;

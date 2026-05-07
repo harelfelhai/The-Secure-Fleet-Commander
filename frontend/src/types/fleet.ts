@@ -66,6 +66,12 @@ export interface ReplayState {
   speedMultiplier: SpeedMultiplier;
 }
 
+export interface PlanWaypoint {
+  id: string;
+  lat: number;
+  lng: number;
+}
+
 export interface AppState {
   agents: Record<string, AgentState>;
   zones: ZonePolygon[];
@@ -76,4 +82,6 @@ export interface AppState {
   toasts: Toast[];
   wsStatus: WsStatus;
   batteryHistory: Record<string, number[]>; // agent_id → last 60 readings
+  planMode: boolean;
+  waypoints: PlanWaypoint[];
 }
